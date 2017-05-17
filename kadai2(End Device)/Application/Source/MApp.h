@@ -59,7 +59,12 @@ enum {
   stateScanActiveWaitConfirm,
   stateAssociate,
   stateAssociateWaitConfirm,
-  stateListen
+  stateListen,
+  Rooter_stateScanEdStart,
+  Rooter_stateScanEdWaitConfirm,
+  Rooter_stateStartCoordinator,
+  Rooter_stateStartCoordinatorWaitConfirm,
+  Rooter_stateListen
 };
 
 

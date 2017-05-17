@@ -353,7 +353,7 @@ void AppTask(event_t events)
         {
           rc = App_HandleAssociateConfirm(pMsgIn);
           if (rc == errorNoError)
-          { 
+          {
               UartUtil_Print("Successfully associated with the coordinator.\n\r", gAllowToBlock_d);
               UartUtil_Print("We were assigned the short address 0x", gAllowToBlock_d);
               UartUtil_PrintHex(maMyAddress, mAddrMode == gAddrModeShort_c ? 2 : 8, 0);
@@ -363,8 +363,17 @@ void AppTask(event_t events)
               LCD_WriteString(1,"Ready to send");
               LCD_WriteString(2,"and receive data");      
               
-              gState = stateListen;
-              TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+//********************************************************
+              if (maMyAddress[1]==0x01){
+            	  UartUtil_Print("\n\rSwitch Role to Rooter\n\r", gAllowToBlock_d);
+            	  gState = stateListen;
+            	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+              }else if(maMyAddress[1]==0x02){
+            	  UartUtil_Print("\n\rSwitch Role to End-Device\n\r", gAllowToBlock_d);
+            	  gState = Rooter_stateScanEdStart;
+            	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+              }
+//********************************************************
           } 
           else 
           {
@@ -377,7 +386,7 @@ void AppTask(event_t events)
       }
     }
     break; 
-    
+        
   case stateListen:
     /* Transmit to coordinator data received from UART. */
     if (events & gAppEvtMessageFromMLME_c)
@@ -441,6 +450,108 @@ void AppTask(event_t events)
       /* Messages from the MCPS must always be freed. */
       MSG_Free(pMsgIn);
     }
+    
+  case Rooter_stateScanEdStart:
+    /* Start the Energy Detection scan, and goto wait for confirm state. */
+    UartUtil_Print("Initiating the Energy Detection Scan\n\r", gAllowToBlock_d);
+    /*Print the message on the LCD also*/
+    LCD_ClearDisplay();
+    LCD_WriteString(1,"Starting Energy");
+    LCD_WriteString(2,"Detection Scan");      
+    ret = App_StartScan(gScanModeED_c);
+    if(ret == errorNoError)
+    {
+      gState = stateScanEdWaitConfirm;
+    }
+    break;
+    
+  case Rooter_stateScanEdWaitConfirm:
+    /* Stay in this state until the MLME Scan confirm message arrives,
+       and has been processed. Then goto Start Coordinator state. */
+    if (events & gAppEvtMessageFromMLME_c)
+    {
+      if (pMsgIn)
+      {
+        ret = App_WaitMsg(pMsgIn, gNwkScanCnf_c);
+        if(ret == errorNoError)
+        {
+          /* Process the ED scan confirm. The logical
+             channel is selected by this function. */
+          App_HandleScanEdConfirm(pMsgIn);
+          /* Go to the Start Coordinator state */
+          gState = stateStartCoordinator;
+          TS_SendEvent(gAppTaskID_c, gAppEvtStartCoordinator_c);
+        }
+      }
+    }
+    break;
+    
+   case Rooter_stateStartCoordinator:
+    if (events & gAppEvtStartCoordinator_c)
+    {
+      /* Start up as a PAN Coordinator on the selected channel. */
+      UartUtil_Print("\n\rStarting as PAN coordinator on channel 0x", gAllowToBlock_d);
+      UartUtil_PrintHex(&mLogicalChannel, 1, FALSE);
+      UartUtil_Print("\n\r", gAllowToBlock_d);
+      /*print a message on the LCD also*/
+      LCD_ClearDisplay();
+      LCD_WriteString(1,"Starting");
+      LCD_WriteString(2,"PAN coordinator");
+      ret = App_StartCoordinator();
+      if(ret == errorNoError)
+      {
+        /* If the Start request was sent successfully to
+           the MLME, then goto Wait for confirm state. */
+        gState = stateStartCoordinatorWaitConfirm;
+      }
+    }
+    break; 
+   case Rooter_stateStartCoordinatorWaitConfirm:
+    /* Stay in this state until the Start confirm message
+       arrives, and then goto the Listen state. */
+    if (events & gAppEvtMessageFromMLME_c)
+    {
+      if (pMsgIn)
+      {    
+        ret = App_WaitMsg(pMsgIn, gNwkStartCnf_c);
+        if(ret == errorNoError)
+        {
+          UartUtil_Print("Started the coordinator with PAN ID 0x", gAllowToBlock_d);
+          UartUtil_PrintHex((uint8_t *)maPanId, 2, 0);
+          UartUtil_Print(", and short address 0x", gAllowToBlock_d);
+          UartUtil_PrintHex((uint8_t *)maShortAddress, 2, 0);
+          UartUtil_Print(".\n\r\n\rReady to send and receive data over the UART.\n\r\n\r", gAllowToBlock_d);
+          /*print a message on the LCD also*/
+          LCD_ClearDisplay();
+          LCD_WriteString(1,"Ready to send");
+          LCD_WriteString(2,"and receive data");
+          gState = stateListen;
+          TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+        }
+      }
+    }
+    break; 
+    
+  case Rooter_stateListen:
+    /* Stay in this state forever. 
+       Transmit the data received on UART */
+    if (events & gAppEvtMessageFromMLME_c)
+    {
+      /* Get the message from MLME */
+      if (pMsgIn)
+      {      
+        /* Process it */
+        ret = App_HandleMlmeInput(pMsgIn);
+        /* Messages from the MLME must always be freed. */
+      }
+    }
+     if (events & gAppEvtRxFromUart_c)
+    {      
+      /* get byte from UART */
+      App_TransmitUartData();
+    
+    }  
+    break;     
   }
   
   /* Check for pending messages in the Queue */ 
