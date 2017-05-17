@@ -435,19 +435,19 @@ void AppTask(event_t events)
     if (events & gAppEvtStartCoordinator_c)
     {
       /* Start up as a PAN Coordinator on the selected channel. */
-      UartUtil_Print("\n\rStarting as PAN coordinator on channel 0x", gAllowToBlock_d);
+      UartUtil_Print("\n\rStarting as PAN Rooter on channel 0x", gAllowToBlock_d);
       UartUtil_PrintHex(&mLogicalChannel, 1, FALSE);
       UartUtil_Print("\n\r", gAllowToBlock_d);
       /*print a message on the LCD also*/
       LCD_ClearDisplay();
       LCD_WriteString(1,"Starting");
-      LCD_WriteString(2,"PAN coordinator");
-      ret = App_StartCoordinator();
+      LCD_WriteString(2,"PAN Rooter");
+      ret = App_StartRooter();
       if(ret == errorNoError)
       {
         /* If the Start request was sent successfully to
            the MLME, then goto Wait for confirm state. */
-        gState = stateStartCoordinatorWaitConfirm;
+        gState = Rooter_stateStartCoordinatorWaitConfirm;
       }
     }
     break; 
@@ -462,7 +462,7 @@ void AppTask(event_t events)
         ret = App_WaitMsg(pMsgIn, gNwkStartCnf_c);
         if(ret == errorNoError)
         {
-          UartUtil_Print("Started the coordinator with PAN ID 0x", gAllowToBlock_d);
+          UartUtil_Print("Started the Rooter with PAN ID 0x", gAllowToBlock_d);
           UartUtil_PrintHex((uint8_t *)maPanId, 2, 0);
           UartUtil_Print(", and short address 0x", gAllowToBlock_d);
           UartUtil_PrintHex((uint8_t *)maShortAddress, 2, 0);
@@ -471,7 +471,7 @@ void AppTask(event_t events)
           LCD_ClearDisplay();
           LCD_WriteString(1,"Ready to send");
           LCD_WriteString(2,"and receive data");
-          gState = stateListen;
+          gState = Rooter_stateListen;
           TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
         }
       }
@@ -1193,4 +1193,104 @@ uint8_t ASP_APP_SapHandler(aspToAppMsg_t *pMsg)
   return gSuccess_c;
 }
 
+/******************************************************************************
+* The App_StartScan(scanType) function will start the scan process of the
+* specified type in the MAC. This is accomplished by allocating a MAC message,
+* which is then assigned the desired scan parameters and sent to the MLME
+* service access point. The MAC PIB attributes "macShortAddress", and 
+* "macAssociatePermit" are modified.
+*
+* The function may return either of the following values:
+*   errorNoError:          The Scan message was sent successfully.
+*   errorInvalidParameter: The MLME service access point rejected the
+*                          message due to an invalid parameter.
+*   errorAllocFailed:      A message buffer could not be allocated.
+*
+******************************************************************************/
+static uint8_t App_StartRooter(void)
+{
+  /* Message for the MLME will be allocated and attached to this pointer */
+  mlmeMessage_t *pMsg;
+
+  UartUtil_Print("Sending the MLME-Start Request message to the MAC...", gAllowToBlock_d);
+  
+  /* Allocate a message for the MLME (We should check for NULL). */
+  pMsg = MSG_AllocType(mlmeMessage_t);
+  if(pMsg != NULL)
+  {
+    /* Pointer which is used for easy access inside the allocated message */
+    mlmeStartReq_t *pStartReq;
+    /* Return value from MSG_send - used for avoiding compiler warnings */
+    uint8_t ret;
+    /* Boolean value that will be written to the MAC PIB */
+    uint8_t boolFlag;
+    
+    /* Set-up MAC PIB attributes. Please note that Set, Get,
+       and Reset messages are not freed by the MLME. */
+    
+    /* We must always set the short address to something
+       else than 0xFFFF before starting a PAN. */
+    pMsg->msgType = gMlmeSetReq_c;
+    pMsg->msgData.setReq.pibAttribute = gMPibShortAddress_c;
+    pMsg->msgData.setReq.pibAttributeValue = (uint8_t *)maShortAddress;
+    ret = MSG_Send(NWK_MLME, pMsg);
+    
+    /* We must set the Association Permit flag to TRUE 
+       in order to allow devices to associate to us. */
+    pMsg->msgType = gMlmeSetReq_c;
+    pMsg->msgData.setReq.pibAttribute = gMPibAssociationPermit_c;
+    boolFlag = TRUE;
+    pMsg->msgData.setReq.pibAttributeValue = &boolFlag;
+    ret = MSG_Send(NWK_MLME, pMsg);
+    
+    /* This is a MLME-START.req command */
+    pMsg->msgType = gMlmeStartReq_c;
+    
+    /* Create the Start request message data. */
+    pStartReq = &pMsg->msgData.startReq;
+    /* PAN ID - LSB, MSB. The example shows a PAN ID of 0xBEEF. */
+    FLib_MemCpy(pStartReq->panId, (void *)maPanId, 2);
+    /* Logical Channel - the default of 11 will be overridden */
+    pStartReq->logicalChannel = mLogicalChannel;
+    /* Beacon Order: 0xF = turn off beacons, less than 0xF = turn on beacons */
+    pStartReq->beaconOrder = 0x0F;  
+    /* Superframe Order: Must be equal or less than the beacon order */
+    pStartReq->superFrameOrder = mDefaultValueOfSuperframeOrder_c;
+    /* Be a PAN coordinator */
+    pStartReq->panCoordinator = TRUE;
+    /* Dont use battery life extension */
+    pStartReq->batteryLifeExt = FALSE;
+    /* This is not a Realignment command */
+    pStartReq->coordRealignment = FALSE;
+    /* Dont use security */
+#ifndef gMAC2006_d	
+    pStartReq->securityEnable = FALSE;
+#else
+	pStartReq->coordRealignSecurityLevel = 0;
+  pStartReq->beaconSecurityLevel = 0;	
+#endif //gMAC2006_d	
+      
+    /* Send the Start request to the MLME. */
+    if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
+    {
+      UartUtil_Print("Done\n\r", gAllowToBlock_d);
+      return errorNoError;
+    }
+    else
+    {
+      /* One or more parameters in the Start Request message were invalid. */
+      UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
+      return errorInvalidParameter;
+    }
+  }
+  else
+  {
+    /* Allocation of a message buffer failed. */
+    UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
+    return errorAllocFailed;
+  }
+}
+
 /******************************************************************************/
+
+
