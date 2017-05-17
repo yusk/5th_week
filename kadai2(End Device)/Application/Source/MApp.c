@@ -370,7 +370,7 @@ void AppTask(event_t events)
             	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
               }else if(maMyAddress[1]==0x02){
             	  UartUtil_Print("\n\rSwitch Role to End-Device\n\r", gAllowToBlock_d);
-            	  gState = Rooter_stateScanEdStart;
+            	  gState = Rooter_stateStartCoordinator;
             	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
               }
 //********************************************************
@@ -430,63 +430,8 @@ void AppTask(event_t events)
 #endif
     
     break;
-  }
   
-  if (pMsgIn)
-  {
-    /* Messages must always be freed. */ 
-    MSG_Free(pMsgIn);
-  }
-  
-   /* Handle MCPS confirms and transmit data from UART */
-  if (events & gAppEvtMessageFromMCPS_c)
-  {      
-    /* Get the message from MCPS */
-    pMsgIn = MSG_DeQueue(&mMcpsNwkInputQueue);
-    if (pMsgIn)
-    {              
-      /* Process it */
-      App_HandleMcpsInput(pMsgIn);
-      /* Messages from the MCPS must always be freed. */
-      MSG_Free(pMsgIn);
-    }
-    
-  case Rooter_stateScanEdStart:
-    /* Start the Energy Detection scan, and goto wait for confirm state. */
-    UartUtil_Print("Initiating the Energy Detection Scan\n\r", gAllowToBlock_d);
-    /*Print the message on the LCD also*/
-    LCD_ClearDisplay();
-    LCD_WriteString(1,"Starting Energy");
-    LCD_WriteString(2,"Detection Scan");      
-    ret = App_StartScan(gScanModeED_c);
-    if(ret == errorNoError)
-    {
-      gState = stateScanEdWaitConfirm;
-    }
-    break;
-    
-  case Rooter_stateScanEdWaitConfirm:
-    /* Stay in this state until the MLME Scan confirm message arrives,
-       and has been processed. Then goto Start Coordinator state. */
-    if (events & gAppEvtMessageFromMLME_c)
-    {
-      if (pMsgIn)
-      {
-        ret = App_WaitMsg(pMsgIn, gNwkScanCnf_c);
-        if(ret == errorNoError)
-        {
-          /* Process the ED scan confirm. The logical
-             channel is selected by this function. */
-          App_HandleScanEdConfirm(pMsgIn);
-          /* Go to the Start Coordinator state */
-          gState = stateStartCoordinator;
-          TS_SendEvent(gAppTaskID_c, gAppEvtStartCoordinator_c);
-        }
-      }
-    }
-    break;
-    
-   case Rooter_stateStartCoordinator:
+  case Rooter_stateStartCoordinator:
     if (events & gAppEvtStartCoordinator_c)
     {
       /* Start up as a PAN Coordinator on the selected channel. */
@@ -506,7 +451,8 @@ void AppTask(event_t events)
       }
     }
     break; 
-   case Rooter_stateStartCoordinatorWaitConfirm:
+    
+  case Rooter_stateStartCoordinatorWaitConfirm:
     /* Stay in this state until the Start confirm message
        arrives, and then goto the Listen state. */
     if (events & gAppEvtMessageFromMLME_c)
@@ -553,6 +499,25 @@ void AppTask(event_t events)
     }  
     break;     
   }
+  
+  if (pMsgIn)
+  {
+    /* Messages must always be freed. */ 
+    MSG_Free(pMsgIn);
+  }
+  
+   /* Handle MCPS confirms and transmit data from UART */
+  if (events & gAppEvtMessageFromMCPS_c)
+  {      
+    /* Get the message from MCPS */
+    pMsgIn = MSG_DeQueue(&mMcpsNwkInputQueue);
+    if (pMsgIn)
+    {              
+      /* Process it */
+      App_HandleMcpsInput(pMsgIn);
+      /* Messages from the MCPS must always be freed. */
+      MSG_Free(pMsgIn);
+    }
   
   /* Check for pending messages in the Queue */ 
   if(MSG_Pending(&mMcpsNwkInputQueue))
