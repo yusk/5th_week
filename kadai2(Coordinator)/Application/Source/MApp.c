@@ -773,7 +773,7 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
         UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[1], 2, 1);
         UartUtil_Print(" /1024 [g]\n\rY axis : 0x", gAllowToBlock_d);
         UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[3], 2, 1);
-		UartUtil_Print(" /1024 [g]\n\rX axis : 0x", gAllowToBlock_d);
+		UartUtil_Print(" /1024 [g]\n\rZ axis : 0x", gAllowToBlock_d);
 		UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[5], 2, 1);
 		UartUtil_Print(" /1024 [g]\n\r", gAllowToBlock_d);
 		//UartUtil_Tx(&pMsgIn->msgData.dataInd.pMsdu[1], 6);

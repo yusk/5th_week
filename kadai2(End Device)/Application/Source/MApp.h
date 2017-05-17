@@ -34,10 +34,10 @@
 *************************************************************************************
 ************************************************************************************/
 /*Set the Coordinator short address */ 
-#define mDefaultValueOfShortAddress_c     0x7011
+#define mDefaultValueOfShortAddress_c     0x7004
 
 /*Set the Coordinator PanID */ 
-#define mDefaultValueOfPanId_c            0x7011
+#define mDefaultValueOfPanId_c            0x7004
 
 /* Maximum number of outstanding packets */
 #define mDefaultValueOfMaxPendingDataPackets_c 2
