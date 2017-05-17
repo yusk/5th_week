@@ -79,10 +79,10 @@ enum {
 *************************************************************************************
 ************************************************************************************/
 /*Set the Coordinator short address */ 
-#define mDefaultValueOfShortAddress_c     0x7011
+#define mDefaultValueOfShortAddress_c     0x7004
 
 /*Set the Coordinator PanID */ 
-#define mDefaultValueOfPanId_c            0x7011
+#define mDefaultValueOfPanId_c            0x7004
 
 /* Defines the beaconed network configuration. The values shown
    are suitable for transfer of 19200bps bidirectional UART data. */
