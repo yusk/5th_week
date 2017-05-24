@@ -64,7 +64,9 @@ static void GenandTransData(uint8_t Length, uint8_t* pTxData, uint8_t* dest_addr
 static void count_timer  (uint8_t timerId);
 
 /* added by yusk */
-static void App_TransmitUartData(void);
+static void Router_TransmitUartData(void);
+static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg);
+static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn);
 
 volatile static uint8_t global_counter;
 
@@ -397,7 +399,7 @@ void AppTask(event_t events)
       if (pMsgIn)
       {  
         /* Process it */
-        rc = App_HandleMlmeInput(pMsgIn);
+        rc = APP_HandleMlmeInput(pMsgIn);
       }
     } 
     
@@ -491,14 +493,14 @@ void AppTask(event_t events)
       if (pMsgIn)
       {      
         /* Process it */
-        ret = App_HandleMlmeInput(pMsgIn);
+        ret = Router_HandleMlmeInput(pMsgIn);
         /* Messages from the MLME must always be freed. */
       }
     }
      if (events & gAppEvtRxFromUart_c)
     {      
       /* get byte from UART */
-      App_TransmitUartData();
+      Router_TransmitUartData();
     
     }  
     break;     
@@ -577,6 +579,105 @@ static uint8_t App_HandleMlmeInput(nwkMessage_t *pMsg)
   }
   return errorNoError;
 }
+
+/* added by yusk */
+static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg)
+{
+  if(pMsg == NULL)
+    return errorNoMessage;
+  
+  /* Handle the incoming message. The type determines the sort of processing.*/
+  switch(pMsg->msgType) {
+  case gNwkAssociateInd_c:
+    UartUtil_Print("Received an MLME-Associate Indication from the MAC\n\r", gAllowToBlock_d);
+    /* A device sent us an Associate Request. We must send back a response.  */
+    return Router_SendAssociateResponse(pMsg);
+    break;
+    
+  case gNwkCommStatusInd_c:
+    /* Sent by the MLME after the Association Response has been transmitted. */
+    UartUtil_Print("Received an MLME-Comm-Status Indication from the MAC - status = ", gAllowToBlock_d);
+    UartUtil_PrintHex(&pMsg->msgData.commStatusInd.status, 1, gPrtHexNewLine_c);
+    break;
+  }
+  return errorNoError;
+}
+
+/* added by yusk */
+static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
+{
+  mlmeMessage_t *pMsg;
+  mlmeAssociateRes_t *pAssocRes;
+  
+  static uint8_t nwk_addr;
+ 
+  UartUtil_Print("Sending the MLME-Associate Response message to the MAC...", gAllowToBlock_d);
+ 
+  /* Allocate a message for the MLME */
+  pMsg = MSG_AllocType(mlmeMessage_t);
+  if(pMsg != NULL)
+  {
+    /* This is a MLME-ASSOCIATE.res command */
+    pMsg->msgType = gMlmeAssociateRes_c;
+    
+    /* Create the Associate response message data. */
+    pAssocRes = &pMsg->msgData.associateRes;
+    
+    /* Assign a short address to the device. In this example we simply
+       choose 0x0001. Though, all devices and coordinators in a PAN must have
+       different short addresses. However, if a device do not want to use 
+       short addresses at all in the PAN, a short address of 0xFFFE must
+       be assigned to it. */
+    if(pMsgIn->msgData.associateInd.capabilityInfo & gCapInfoAllocAddr_c)
+    {
+      /* Assign a unique short address less than 0xfffe if the device requests so. */
+      pAssocRes->assocShortAddress[0] = maMyAddress[0];
+      pAssocRes->assocShortAddress[1] = 0x02;
+      nwk_addr += 1;
+    }
+    else
+    {
+      /* A short address of 0xfffe means that the device is granted access to
+         the PAN (Associate successful) but that long addressing is used.*/
+      pAssocRes->assocShortAddress[0] = 0xFE;
+      pAssocRes->assocShortAddress[1] = 0xFF;
+    }
+    /* Get the 64 bit address of the device requesting association. */
+    FLib_MemCpy(pAssocRes->deviceAddress, pMsgIn->msgData.associateInd.deviceAddress, 8);
+    /* Association granted. May also be gPanAtCapacity_c or gPanAccessDenied_c. */
+    pAssocRes->status = gSuccess_c;
+    /* Do not use security */
+#ifndef gMAC2006_d
+    pAssocRes->securityEnable = FALSE;
+#else
+  pAssocRes->securityLevel = 0;
+#endif //gMAC2006_d 
+    
+    /* Save device info. */
+    FLib_MemCpy(maDeviceShortAddress, pAssocRes->assocShortAddress, 2);
+    FLib_MemCpy(maDeviceLongAddress,  pAssocRes->deviceAddress,     8);
+    
+    /* Send the Associate Response to the MLME. */
+    if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
+    {
+      UartUtil_Print("Done\n\r", gAllowToBlock_d);
+      return errorNoError;
+    }
+    else
+    {
+      /* One or more parameters in the message were invalid. */
+      UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
+      return errorInvalidParameter;
+    }
+  }
+  else
+  {
+    /* Allocation of a message buffer failed. */
+    UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
+    return errorAllocFailed;
+  }
+}
+
 /************************************************************************************
 *************************************************************************************
 * Private functions
@@ -585,7 +686,7 @@ static uint8_t App_HandleMlmeInput(nwkMessage_t *pMsg)
 
 
 /* added by yusk */
-static void App_TransmitUartData(void)
+static void Router_TransmitUartData(void)
 {   
   static uint8_t keysBuffer[mMaxKeysToReceive_c];
   static uint8_t keysReceived = 0;
