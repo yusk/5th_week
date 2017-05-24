@@ -1,0 +1,1677 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /******************************************************************************
+    2:  * SPI Serial Port driver implementation. 
+    3:  *
+    4:  * Copyright (c) 2010, Freescale, Inc. All right reserved
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied, 
+    8:  * transcribed, printed or by any electronic means - vithout specific written
+    9:  * permission from Freescale Semicondictor.
+   10:  *  
+   11:  ******************************************************************************/
+   12:  
+   13:  #include "EmbeddedTypes.h"
+   14:  #include "IrqControlLib.h"
+   15:  #include "IoConfig.h"
+   16:  #include "TS_Interface.h"
+   17:  #include "SPI.h"
+   18:  #include "SPI_Interface.h"
+   19:  
+   20:  #ifndef gMacStandAlone_d
+   21:  #define gMacStandAlone_d 0
+   22:  #endif
+   23:  
+   24:  #if gMacStandAlone_d
+   25:    #include "Mac_Globals.h"
+   26:  #endif
+   27:  
+   28:  /******************************************************************************
+   29:  *******************************************************************************
+   30:  * Private macros
+   31:  *******************************************************************************
+   32:  ******************************************************************************/
+   33:  
+   34:  
+   35:  /******************************************************************************
+   36:  *******************************************************************************
+   37:  * Private type definitions
+   38:  *******************************************************************************
+   39:  ******************************************************************************/
+   40:  /* The transmit code keeps a circular list of buffers to be sent */
+   41:  typedef struct SpiTxBufRef_tag
+   42:  {
+   43:    uint8_t       *pTxBuf;
+   44:    uint8_t       mTxBufLen;
+   45:    void          (*pfTxBufCallBack)(uint8_t *pTxBuf);
+   46:  } SpiTxBufRef_t;
+   47:  
+   48:  typedef enum 
+   49:  {
+   50:    mSpi_OpType_Tx_c,
+   51:    mSpi_OpType_Rx_c
+   52:  } spiOpType_t;
+   53:  
+   54:  typedef struct spiMasterOp_tag
+   55:  {
+   56:    spiOpType_t   spiOpType;
+   57:    uint8_t       *pBuf;
+   58:    uint8_t       bufLen;
+   59:  } spiMasterOp_t;
+   60:  
+   61:  typedef struct SpiTxCallbackTable_tag
+   62:  {
+   63:    void          (*pfTxCallBack)(uint8_t *pTxBuf);
+   64:    uint8_t       *pTxBuf;
+   65:  } SpiTxCallbackTable_t;
+   66:  
+   67:  /******************************************************************************
+   68:  *******************************************************************************
+   69:  * Public memory definitions
+   70:  *******************************************************************************
+   71:  ******************************************************************************/
+   72:  #if (gSPI_Enabled_d == TRUE)
+   73:    /* Global variable keeping the current SPI module configuration */
+   74:    spiConfig_t gSpiConfig;
+   75:  
+   76:    /* Id for SPI Task */
+   77:    tsTaskID_t  gSpiTaskId;
+   78:     
+   79:  #endif
+   80:  
+   81:  
+   82:  /******************************************************************************
+   83:  *******************************************************************************
+   84:  * Private memory definitions
+   85:  *******************************************************************************
+   86:  ******************************************************************************/
+   87:  #if (gSPI_Enabled_d == TRUE)
+   88:    /* Slave Tx circular buffers */
+   89:    static SpiTxBufRef_t          maSpiTxBufRefTable[gSPI_SlaveTransmitBuffersNo_c];
+   90:    /* Leading and trailing indexes for Tx circular buffers */
+   91:    /* The leading index is the next position to store a buffer reference.
+   92:       The trailing index is the buffer currently being transmitted. */
+   93:    static index_t                mSpiTxBufRefLeadingIndex;
+   94:    static index_t                mSpiTxBufRefTrailingIndex;
+   95:    /* Current index in the processed buffer specified by 'mSpiTxBufRefTrailingIndex' */
+   96:    static index_t                mSpiTxBufRefCurIndex;
+   97:    
+   98:    /* Callback table and index pointers */
+   99:    static SpiTxCallbackTable_t   maSpiTxCallbackTable[gSPI_SlaveTransmitBuffersNo_c];
+  100:    static index_t                maSpiTxCallbackLeadingIndex   = 0;
+  101:    static index_t                maSpiTxCallbackTrailingIndex  = 0;
+  102:    
+  103:    /* Slave Rx circular buffer */
+  104:    static uint8_t                maSpiRxBuf[gSPI_SlaveReceiveBufferSize_c];
+  105:    static index_t                mSpiRxBufLeadingIndex;
+  106:    static index_t                mSpiRxBufTrailingIndex;
+  107:    volatile index_t              mSpiRxBufferByteCount;
+  108:  
+  109:    /* Local variable to keep the SPI Master Tx and Rx callbacks provided by application */
+  110:    static void                   (*pfSpiMasterTxCallBack)(bool_t status);
+  111:    static void                   (*pfSpiMasterRxCallBack)(bool_t status); 
+  112:    static void                   (*pfSpiSlaveRxCallBack)(void);
+  113:    static spiMasterOp_t          mSpiMasterOp;
+  114:  #endif
+  115:  
+  116:  
+  117:  /******************************************************************************
+  118:  *******************************************************************************
+  119:  * Private function prototypes
+  120:  *******************************************************************************
+  121:  ******************************************************************************/
+  122:  #if(gSPI_Enabled_d == TRUE)
+  123:    static void SPI_Task(event_t events);
+  124:    
+  125:    #if defined(PROCESSOR_MC1323X)
+  126:      static void SPI1_SlaveSendNextByte(void);  
+  127:    #elif defined(PROCESSOR_QE128)
+  128:      static void SPI2_SlaveSendNextByte(void);  
+  129:    #endif 
+  130:  #endif
+  131:  
+  132:  
+  133:  /******************************************************************************
+  134:  *******************************************************************************
+  135:  * Public functions
+  136:  *******************************************************************************
+  137:  ******************************************************************************/
+  138:  
+  139:  /******************************************************************************
+  140:  *  SPI1_Init
+  141:  * 
+  142:  *  Initialize the SPI module 
+  143:  ******************************************************************************/
+  144:  #if defined(PROCESSOR_MC1323X)
+  145:    bool_t SPI1_Init(void)
+  146:    {           
+  147:      #if (gSPI_Enabled_d == TRUE)
+  148:        bool_t retStatus = FALSE;
+  149:        
+  150:        /* Create the SPI Task */
+  151:        gSpiTaskId = TS_CreateTask(gTsSpiTaskPriority_c, SPI_Task);
+  152:        
+  153:        if(gTsInvalidTaskID_c != gSpiTaskId)
+  154:        {
+  155:          /* Initialize the global variable structure */
+  156:          gSpiConfig.devMode      = gSPI_DefaultMode_c;
+  157:          gSpiConfig.clockPol     = gSPI_DefaultClockPol_c;
+  158:          gSpiConfig.clockPhase   = gSPI_DefaultClockPhase_c;
+  159:          gSpiConfig.baudRate     = gSPI_DefaultBaudRate_c;
+  160:          gSpiConfig.bitwiseShift = gSPI_DefaultBitwiseShfting_c;
+  161:          gSpiConfig.s3Wire       = gSPI_DefaultOperMode_c;
+  162:          
+  163:          /* Clear the SPI Rx software buffer */
+  164:          mSpiRxBufLeadingIndex = mSpiRxBufTrailingIndex = mSpiRxBufferByteCount = 0;
+  165:          /* Initialize all SPI callback pointers */
+  166:          pfSpiSlaveRxCallBack  = NULL;
+  167:          pfSpiMasterTxCallBack = pfSpiMasterRxCallBack = NULL;
+  168:          
+  169:          /* Initialize the SPI module registers */
+  170:          /* Note:  both Tx and Rx interrupts are disabled */
+  171:          SPIC1 = mSPIxC1_Init_c;
+  172:          SPIC2 = mSPIxC2_Init_c;
+  173:          SPIBR = gSPI_DefaultBaudRate_c;  
+  174:          
+  175:          /* Update the retStatus variable */
+  176:          retStatus = TRUE;     
+  177:        }
+  178:  
+  179:        return retStatus;        
+  180:      #else
+  181:        return FALSE;
+  0000 4f       [1]             CLRA  
+  182:      #endif      
+  183:    }
+  0001 8d       [7]             RTC   
+  184:  #endif
+  185:  
+  186:  /******************************************************************************
+  187:  *  SPI2_Init
+  188:  * 
+  189:  *  Initialize the SPI module 
+  190:  ******************************************************************************/
+  191:  #if defined(PROCESSOR_QE128)  
+  192:    bool_t SPI2_Init(void)
+  193:    {    
+  194:      #if (gSPI_Enabled_d == TRUE) 
+  195:        bool_t retStatus = FALSE;
+  196:        
+  197:        /* Create the SPI Task */
+  198:        gSpiTaskId = TS_CreateTask(gTsSpiTaskPriority_c, SPI_Task);
+  199:        
+  200:        if(gTsInvalidTaskID_c != gSpiTaskId)
+  201:        {
+  202:          /* Initialize the global variable structure */
+  203:          gSpiConfig.devMode      = gSPI_DefaultMode_c;
+  204:          gSpiConfig.clockPol     = gSPI_DefaultClockPol_c;
+  205:          gSpiConfig.clockPhase   = gSPI_DefaultClockPhase_c;
+  206:          gSpiConfig.baudRate     = gSPI_DefaultBaudRate_c;
+  207:          gSpiConfig.bitwiseShift = gSPI_DefaultBitwiseShfting_c;
+  208:          gSpiConfig.s3Wire       = gSPI_DefaultOperMode_c;
+  209:          
+  210:          /* Clear the SPI Rx software buffer */
+  211:          mSpiRxBufLeadingIndex = mSpiRxBufTrailingIndex = mSpiRxBufferByteCount = 0;
+  212:          /* Initialize all SPI callback pointers */
+  213:          pfSpiSlaveRxCallBack  = NULL;
+  214:          pfSpiMasterTxCallBack = pfSpiMasterRxCallBack = NULL;
+  215:          
+  216:          /* Initialize the SPI module registers */
+  217:          /* Note:  both Tx and Rx interrupts are disabled */
+  218:          SPI2C1 = mSPIxC1_Init_c;
+  219:          SPI2C2 = mSPIxC2_Init_c;
+  220:          SPI2BR = gSPI_DefaultBaudRate_c;  
+  221:          
+  222:          /* Update the retStatus variable */
+  223:          retStatus = TRUE;     
+  224:        }
+  225:  
+  226:        return retStatus; 
+  227:      #else
+  228:        return FALSE;
+  229:      #endif    
+  230:    }
+  231:  #endif
+  232:  
+  233:  /******************************************************************************
+  234:  *  SPI1_Uninit
+  235:  * 
+  236:  *  Uninitialize the SPI module 
+  237:  ******************************************************************************/
+  238:  #if defined(PROCESSOR_MC1323X)
+  239:    void SPI1_Uninit(void)
+  240:    { 
+  241:      #if (gSPI_Enabled_d == TRUE)    
+  242:        /* Destroy the SPI task if there is a valid ID */
+  243:        if(gTsInvalidTaskID_c != gSpiTaskId)
+  244:        {
+  245:          TS_DestroyTask(gSpiTaskId); 
+  246:        }
+  247:        
+  248:        SPIC1 = mSPIxC1_Reset_c;
+  249:        SPIC2 = mSPIxC2_Reset_c;   
+  250:      #endif      
+  251:    }
+  0000 8d       [7]             RTC   
+  252:  #endif
+  253:  
+  254:  /******************************************************************************
+  255:  *  SPI2_Uninit
+  256:  * 
+  257:  *  Uninitialize the SPI module 
+  258:  ******************************************************************************/
+  259:  #if defined(PROCESSOR_QE128) 
+  260:    void SPI2_Uninit(void)  
+  261:    {          
+  262:      #if (gSPI_Enabled_d == TRUE) 
+  263:        /* Destroy the SPI task if there is a valid ID */
+  264:        if(gTsInvalidTaskID_c != gSpiTaskId)
+  265:        {
+  266:          TS_DestroyTask(gSpiTaskId); 
+  267:        }
+  268:        
+  269:        SPI2C1 = mSPIxC1_Reset_c;
+  270:        SPI2C2 = mSPIxC2_Reset_c;          
+  271:      #endif       
+  272:    }
+  273:  #endif
+  274:  
+  275:  /******************************************************************************
+  276:  *  SPI1_SetConfig
+  277:  * 
+  278:  *  Set the configuration of the SPI module 
+  279:  ******************************************************************************/
+  280:  #if defined(PROCESSOR_MC1323X)
+  281:    void SPI1_SetConfig(spiConfig_t mSpiConfig)
+  282:    {      
+  283:      #if (gSPI_Enabled_d == TRUE)
+  284:     
+  285:        gSpiConfig = mSpiConfig;
+  286:        
+  287:        /* Disable the SPI module */
+  288:        SPIC1 &= ~mSPIxC1_SPE_c;
+  289:         
+  290:        /* SPI mode of operation */
+  291:        if(gSpiConfig.devMode == gSPI_MasterMode_c)
+  292:        {
+  293:          SPIC1 |= mSPIxC1_MSTR_c;  
+  294:          SPIBR  = gSpiConfig.baudRate;
+  295:          
+  296:          /* Disable all SPI interrupts */
+  297:          SPIC1 &= ~(mSPIxC1_SPIE_c | mSPIxC1_SPTIE_c); 
+  298:          
+  299:          #if (TRUE == gSPI_AutomaticSsPinAssertion_c)
+  300:            /* Assert the nSS output pin to select the slave */       
+  301:            SPIC1 |= mSPIxC1_SSOE_c;
+  302:            SPIC2 |= mSPIxC2_MODFEN_c;
+  303:          #endif
+  304:          
+  305:          #if gSPI_Slave_TxDataAvailableSignal_Enable_c 
+  306:            /* Configure as output the GPIO that will be used to signal 
+  307:    	            slave device has data to be transmitted */
+  308:            SPI_ConfigRxDataAvailablePin();
+  309:          #endif    
+  310:        }
+  311:        else if(gSpiConfig.devMode == gSPI_SlaveMode_c)
+  312:        {
+  313:          SPIC1 &= ~mSPIxC1_MSTR_c;
+  314:          
+  315:          /* Assure that the SPI receive flag is cleared before enabling the receive 
+  316:             interrput in order to avoid false alarms */
+  317:          if(SPIS & mSPIxS_SPRF_c)
+  318:          {
+  319:            SPID;   
+  320:          }
+  321:                     
+  322:          /* Enable the Receive Interrupt */
+  323:          SPIC1 |= mSPIxC1_SPIE_c;
+  324:          
+  325:          #if (TRUE == gSPI_AutomaticSsPinAssertion_c)
+  326:            /* Keep the nSS pin deasserted */
+  327:            SPIC2 &= ~mSPIxC2_MODFEN_c;
+  328:            SPIC1 &= ~mSPIxC1_SSOE_c;                
+  329:          #endif
+  330:          
+  331:          #if gSPI_Slave_TxDataAvailableSignal_Enable_c 
+  332:            /* Configure as output the GPIO that will be used to signal 
+  333:    	            slave device has data to be transmitted */
+  334:            SPI_ConfigTxDataAvailablePin();
+  335:          #endif           
+  336:        }
+  337:        
+  338:        /* Bitwise shifting mode */
+  339:        if(gSpiConfig.bitwiseShift == gSPI_LsbFirst_c)
+  340:        {
+  341:          SPIC1 |= mSPIxC1_LSBFE_c;  
+  342:        }
+  343:        else if(gSpiConfig.bitwiseShift == gSPI_MsbFirst_c)
+  344:        {
+  345:          SPIC1 &= ~mSPIxC1_LSBFE_c;      
+  346:        }
+  347:        
+  348:        /* Clock polarity */
+  349:        if(gSpiConfig.clockPol == gSPI_ActiveLowPolarity_c)
+  350:        {
+  351:          SPIC1 |= mSPIxC1_CPOL_c;  
+  352:        }
+  353:        else if(gSpiConfig.clockPol == gSPI_ActiveHighPolarity_c)
+  354:        {
+  355:          SPIC1 &= ~mSPIxC1_CPOL_c;
+  356:        }
+  357:        
+  358:        /* Clock phase */
+  359:        if(gSpiConfig.clockPhase == gSPI_OddEdgeShifting_c)
+  360:        {
+  361:          SPIC1 |= mSPIxC1_CPHA_c;  
+  362:        }
+  363:        else if(gSpiConfig.clockPhase == gSPI_EvenEdgeShifting_c)
+  364:        {
+  365:          SPIC1 &= ~mSPIxC1_CPHA_c; 
+  366:        }
+  367:        
+  368:        /* SPI bus wires number */
+  369:        if(gSpiConfig.s3Wire == gSPI_SingleWire_c)
+  370:        {
+  371:          SPIC2 |= mSPIxC2_SPC0_c;
+  372:        }
+  373:        else if(gSpiConfig.s3Wire == gSPI_FullDuplex_c)
+  374:        {
+  375:          SPIC2 &= ~mSPIxC2_SPC0_c; 
+  376:        }
+  377:        
+  378:        /* Enable the SPI module */
+  379:        SPIC1 |= mSPIxC1_SPE_c;    
+  380:      #else
+  381:        (void) mSpiConfig;
+  382:      #endif 
+  383:    }
+  0000 8d       [7]             RTC   
+  384:  #endif
+  385:  
+  386:  
+  387:  /******************************************************************************
+  388:  *  SPI2_SetConfig
+  389:  * 
+  390:  *  Set the configuration of the SPI module 
+  391:  ******************************************************************************/
+  392:  #if defined(PROCESSOR_QE128) 
+  393:    void SPI2_SetConfig(spiConfig_t mSpiConfig)
+  394:    {
+  395:      #if (gSPI_Enabled_d == TRUE)
+  396:        gSpiConfig = mSpiConfig;
+  397:        
+  398:        /* Disable the SPI module */
+  399:        SPI2C1 &= ~mSPIxC1_SPE_c;
+  400:         
+  401:        /* SPI mode of operation */
+  402:        if(gSpiConfig.devMode == gSPI_MasterMode_c)
+  403:        {
+  404:          SPI2C1 |= mSPIxC1_MSTR_c;  
+  405:          SPI2BR  = gSpiConfig.baudRate;
+  406:          
+  407:          /* Disable all SPI interrupts */
+  408:          SPI2C1 &= ~(mSPIxC1_SPIE_c | mSPIxC1_SPTIE_c); 
+  409:          
+  410:          #if (TRUE == gSPI_AutomaticSsPinAssertion_c)
+  411:            /* Assert the nSS output pin to select the slave */       
+  412:            SPI2C1 |= mSPIxC1_SSOE_c;
+  413:            SPI2C2 |= mSPIxC2_MODFEN_c;
+  414:          #endif
+  415:          
+  416:          #if gSPI_Slave_TxDataAvailableSignal_Enable_c 
+  417:            /* Configure as output the GPIO that will be used to signal 
+  418:    	            slave device has data to be transmitted */
+  419:            SPI_ConfigRxDataAvailablePin();
+  420:          #endif    
+  421:        }
+  422:        else if(gSpiConfig.devMode == gSPI_SlaveMode_c)
+  423:        {
+  424:          SPI2C1 &= ~mSPIxC1_MSTR_c;
+  425:          
+  426:          /* Assure that the SPI receive flag is cleared before enabling the receive 
+  427:             interrput in order to avoid false alarms */
+  428:          if(SPI2S & mSPIxS_SPRF_c)
+  429:          {
+  430:            SPI2D;   
+  431:          }
+  432:                     
+  433:          /* Enable the Receive Interrupt */
+  434:          SPI2C1 |= mSPIxC1_SPIE_c;
+  435:          
+  436:          #if (TRUE == gSPI_AutomaticSsPinAssertion_c)
+  437:            /* Keep the nSS pin deasserted */
+  438:            SPI2C2 &= ~mSPIxC2_MODFEN_c;
+  439:            SPI2C1 &= ~mSPIxC1_SSOE_c;                
+  440:          #endif
+  441:          
+  442:          #if gSPI_Slave_TxDataAvailableSignal_Enable_c 
+  443:            /* Configure as output the GPIO that will be used to signal 
+  444:    	            slave device has data to be transmitted */
+  445:            SPI_ConfigTxDataAvailablePin();
+  446:          #endif           
+  447:        }
+  448:        
+  449:        /* Bitwise shifting mode */
+  450:        if(gSpiConfig.bitwiseShift == gSPI_LsbFirst_c)
+  451:        {
+  452:          SPI2C1 |= mSPIxC1_LSBFE_c;  
+  453:        }
+  454:        else if(gSpiConfig.bitwiseShift == gSPI_MsbFirst_c)
+  455:        {
+  456:          SPI2C1 &= ~mSPIxC1_LSBFE_c;      
+  457:        }
+  458:        
+  459:        /* Clock polarity */
+  460:        if(gSpiConfig.clockPol == gSPI_ActiveLowPolarity_c)
+  461:        {
+  462:          SPI2C1 |= mSPIxC1_CPOL_c;  
+  463:        }
+  464:        else if(gSpiConfig.clockPol == gSPI_ActiveHighPolarity_c)
+  465:        {
+  466:          SPI2C1 &= ~mSPIxC1_CPOL_c;
+  467:        }
+  468:        
+  469:        /* Clock phase */
+  470:        if(gSpiConfig.clockPhase == gSPI_OddEdgeShifting_c)
+  471:        {
+  472:          SPI2C1 |= mSPIxC1_CPHA_c;  
+  473:        }
+  474:        else if(gSpiConfig.clockPhase == gSPI_EvenEdgeShifting_c)
+  475:        {
+  476:          SPI2C1 &= ~mSPIxC1_CPHA_c; 
+  477:        }
+  478:        
+  479:        /* SPI bus wires number */
+  480:        if(gSpiConfig.s3Wire == gSPI_SingleWire_c)
+  481:        {
+  482:          SPI2C2 |= mSPIxC2_SPC0_c;
+  483:        }
+  484:        else if(gSpiConfig.s3Wire == gSPI_FullDuplex_c)
+  485:        {
+  486:          SPI2C2 &= ~mSPIxC2_SPC0_c; 
+  487:        }
+  488:        
+  489:        /* Enable the SPI module */
+  490:        SPI2C1 |= mSPIxC1_SPE_c;
+  491:      #else
+  492:        (void) mSpiConfig;
+  493:      #endif   
+  494:    }
+  495:  #endif
+  496:  
+  497:  
+  498:  /******************************************************************************
+  499:  *  SPI_GetConfig
+  500:  * 
+  501:  *  Get the configuration of the SPI module 
+  502:  ******************************************************************************/
+  503:  bool_t SPI_GetConfig(spiConfig_t* pSpiConfig)
+  504:  {
+  505:    #if (gSPI_Enabled_d == TRUE)
+  506:      bool_t retStatus = TRUE;
+  507:      
+  508:      if(NULL == pSpiConfig)
+  509:      {
+  510:        retStatus = FALSE;
+  511:      }
+  512:      else
+  513:      {
+  514:        /* Save all memebers of the spiConfig_t struct. */
+  515:        pSpiConfig->devMode     = gSpiConfig.devMode;
+  516:        pSpiConfig->baudRate    = gSpiConfig.baudRate;
+  517:        pSpiConfig->clockPol    = gSpiConfig.clockPol;
+  518:        pSpiConfig->clockPhase  = gSpiConfig.clockPhase;
+  519:        pSpiConfig->bitwiseShift= gSpiConfig.bitwiseShift;
+  520:        pSpiConfig->s3Wire      = gSpiConfig.s3Wire;
+  521:      }
+  522:      
+  523:      return retStatus;    
+  524:    #else
+  525:      (void) pSpiConfig;
+  526:      return TRUE;
+  0000 a601     [2]             LDA   #1
+  527:    #endif   
+  528:  }
+  0002 8d       [7]             RTC   
+  529:  
+  530:  
+  531:  /******************************************************************************
+  532:  *  SPI_SetSlaveRxCallBack
+  533:  *
+  534:  *  Set the callback function for SPI slave mode receive operation   
+  535:  ******************************************************************************/
+  536:  void SPI_SetSlaveRxCallBack(void (*pfCallBack)(void))
+  537:  {
+  538:    #if (gSPI_Enabled_d == TRUE)
+  539:      pfSpiSlaveRxCallBack = pfCallBack; 
+  540:    #else
+  541:      (void) pfCallBack;
+  542:    #endif
+  543:  }
+  0000 8d       [7]             RTC   
+  544:  
+  545:  /*****************************************************************************
+  546:  *   SPI1_IsSlaveTxActive 
+  547:  *
+  548:  *   Returns TRUE if there is still data to be transmitted to the master.
+  549:  *   Returns FALSE if nothing left to transmit.
+  550:  ******************************************************************************/
+  551:  #if defined(PROCESSOR_MC1323X)
+  552:    bool_t SPI1_IsSlaveTxActive(void) 
+  553:    {
+  554:      #if !gSPI_Enabled_d
+  555:        return FALSE;
+  0000 4f       [1]             CLRA  
+  556:      #else      
+  557:        return (SPIC1 & mSPIxC1_SPTIE_c);     
+  558:      #endif  
+  559:    }
+  0001 8d       [7]             RTC   
+  560:  #endif
+  561:  
+  562:  
+  563:  /*****************************************************************************
+  564:  *   SPI2_IsSlaveTxActive 
+  565:  *
+  566:  *   Returns TRUE if there is still data to be transmitted to the master.
+  567:  *   Returns FALSE if nothing left to transmit.
+  568:  ******************************************************************************/
+  569:  #if defined(PROCESSOR_QE128)
+  570:    bool_t SPI2_IsSlaveTxActive(void) 
+  571:    {
+  572:      #if !gSPI_Enabled_d
+  573:        return FALSE;
+  574:      #else
+  575:          return (SPI2C1 & mSPIxC1_SPTIE_c);
+  576:      #endif  
+  577:    }
+  578:  #endif
+  579:  
+  580:  
+  581:  /******************************************************************************
+  582:  *  SPI1_MasterTransmit
+  583:  *
+  584:  *  Begin transmission of a 'bufLen' size bytes starting from the *pBuf   
+  585:  ******************************************************************************/
+  586:  #if defined(PROCESSOR_MC1323X)
+  587:    bool_t SPI1_MasterTransmit(uint8_t *pBuf, index_t bufLen, void (*pfCallBack)(bool_t status))
+  588:    {
+  589:      #if (gSPI_Enabled_d == TRUE)   
+  590:        bool_t retStatus = TRUE;
+  591:        
+  592:        if(gSpiConfig.devMode == gSPI_MasterMode_c)
+  593:        {
+  594:          /* Handle empty buffers. */
+  595:          if(!bufLen)
+  596:          {
+  597:            /* Call the callback function (with the status FALSE), if the pointer to it is valid */
+  598:            if(pfCallBack)
+  599:            {
+  600:              (*pfCallBack)(FALSE);
+  601:            }
+  602:          }
+  603:          else
+  604:          {
+  605:            /* 'pfSpiMasterTxCallBack' is reset by Spi Task after the callback is called */  
+  606:            /* If 'pfSpiMasterTxCallBack' is != 0 it means that the previous callback 
+  607:               didn't run yet */
+  608:            if(pfSpiMasterTxCallBack)
+  609:            {
+  610:              retStatus = FALSE;
+  611:            }
+  612:            else
+  613:            {
+  614:              /* Update the variable storing the master operation and also the callback */
+  615:              mSpiMasterOp.spiOpType  = mSpi_OpType_Tx_c;     
+  616:              mSpiMasterOp.pBuf       = (uint8_t*)pBuf;
+  617:              mSpiMasterOp.bufLen     = bufLen;
+  618:              pfSpiMasterTxCallBack   = pfCallBack;
+  619:              
+  620:              /* If the 3 wire operation is selected, then select the pin as output */
+  621:              if(gSpiConfig.s3Wire == gSPI_SingleWire_c)
+  622:              {
+  623:                SPIC2 |= mSPIxC2_BIDIROE_c;
+  624:              }                                                      
+  625:              /* Enable the Transmit Interrupt */
+  626:              /* Note: Because the Transmit Buffer is empty it will generate immediatelly an interrupt */
+  627:              SPIC1 |= mSPIxC1_SPTIE_c;
+  628:            }
+  629:          }      
+  630:        }
+  631:        else
+  632:        {
+  633:          retStatus = FALSE;
+  634:        }
+  635:          
+  636:        return retStatus;
+  637:      #else
+  638:        (void) pBuf;
+  639:        (void) bufLen;
+  640:        (void) pfCallBack;
+  641:        
+  642:        return TRUE;
+  0000 a601     [2]             LDA   #1
+  643:      #endif
+  644:    }
+  0002 8d       [7]             RTC   
+  645:  #endif
+  646:  
+  647:  
+  648:  /******************************************************************************
+  649:  *  SPI1_MasterTransmit
+  650:  *
+  651:  *  Begin transmission of a 'bufLen' size bytes starting from the *pBuf   
+  652:  ******************************************************************************/
+  653:  #if defined(PROCESSOR_QE128)
+  654:    bool_t SPI2_MasterTransmit(uint8_t *pBuf, index_t bufLen, void (*pfCallBack)(bool_t status))
+  655:    {  
+  656:      #if (gSPI_Enabled_d == TRUE)    
+  657:        bool_t retStatus = TRUE;
+  658:        
+  659:        if(gSpiConfig.devMode == gSPI_MasterMode_c)
+  660:        {
+  661:          /* Handle empty buffers. */
+  662:          if(!bufLen)
+  663:          {
+  664:            /* Call the callback function (with the status FALSE), if the pointer to it is valid */
+  665:            if(pfCallBack)
+  666:            {
+  667:              (*pfCallBack)(FALSE);
+  668:            }
+  669:          }
+  670:          else
+  671:          {
+  672:            /* 'pfSpiMasterTxCallBack' is reset by Spi Task after the callback is called */  
+  673:            /* If 'pfSpiMasterTxCallBack' is != 0 it means that the previous callback 
+  674:               didn't run yet */
+  675:            if(pfSpiMasterTxCallBack)
+  676:            {
+  677:              retStatus = FALSE;
+  678:            }
+  679:            else
+  680:            {
+  681:              /* Update the variable storing the master operation and also the callback */
+  682:              mSpiMasterOp.spiOpType  = mSpi_OpType_Tx_c;     
+  683:              mSpiMasterOp.pBuf       = (uint8_t*)pBuf;
+  684:              mSpiMasterOp.bufLen     = bufLen;
+  685:              pfSpiMasterTxCallBack   = pfCallBack;
+  686:              
+  687:              /* If the 3 wire operation is selected, then select the pin as output */
+  688:              if(gSpiConfig.s3Wire == gSPI_SingleWire_c)
+  689:              {
+  690:                SPI2C2 |= mSPIxC2_BIDIROE_c;
+  691:              }                                                      
+  692:              /* Enable the Transmit Interrupt */
+  693:              /* Note: Because the Transmit Buffer is empty it will generate immediatelly an interrupt */
+  694:              SPI2C1 |= mSPIxC1_SPTIE_c;
+  695:            }
+  696:          }      
+  697:        }
+  698:        else
+  699:        {
+  700:          retStatus = FALSE;
+  701:        }
+  702:          
+  703:        return retStatus;
+  704:      #else
+  705:        (void) pBuf;
+  706:        (void) bufLen;
+  707:        (void) pfCallBack;
+  708:        
+  709:        return TRUE;    
+  710:      #endif    
+  711:    }
+  712:  #endif
+  713:  
+  714:  
+  715:  /******************************************************************************
+  716:  *  SPI1_MasterReceive
+  717:  *
+  718:  *  Begin reception of a 'bufLen' size bytes starting from the *pBuf   
+  719:  ******************************************************************************/
+  720:  #if defined(PROCESSOR_MC1323X)
+  721:    bool_t SPI1_MasterReceive(uint8_t *pBuf, index_t bufLen, void (*pfCallBack)(bool_t status))
+  722:    {
+  723:      #if (gSPI_Enabled_d == TRUE)       
+  724:        bool_t retStatus = TRUE;
+  725:        
+  726:        if(gSpiConfig.devMode == gSPI_MasterMode_c)
+  727:        {
+  728:          /* Handle empty buffers. */
+  729:          if((!bufLen) || (pBuf == NULL)) 
+  730:          {
+  731:            /* Call the callback function (with the status FALSE), if it is a valid pointer to it */
+  732:            if(pfCallBack)
+  733:            {
+  734:              (*pfCallBack)(FALSE);
+  735:            }      
+  736:          }
+  737:          else
+  738:          {
+  739:            /* 'pfSpiMasterRxCallBack' is reset by Spi Task after the callback is called */
+  740:            /* If 'pfSpiMasterRxCallBack' is != 0 it means that the previous callback didn't run yet */
+  741:            if(pfSpiMasterRxCallBack)
+  742:            {
+  743:              retStatus = FALSE;
+  744:            }
+  745:            else
+  746:            {
+  747:              /* Update the variable storing the master operation and also the callback */
+  748:              mSpiMasterOp.spiOpType  = mSpi_OpType_Rx_c;
+  749:              mSpiMasterOp.pBuf       = (uint8_t*)pBuf;  
+  750:              mSpiMasterOp.bufLen     = bufLen;
+  751:              pfSpiMasterRxCallBack   = pfCallBack;   
+  752:                
+  753:              /* If the 3 wire operation is selected, then select the pin as input */
+  754:              if(gSpiConfig.s3Wire == gSPI_SingleWire_c)
+  755:              {
+  756:                SPIC2 &= ~mSPIxC2_BIDIROE_c;
+  757:              } 
+  758:                       
+  759:              /* Assure that the SPI receive flag is cleared before enabling the receive 
+  760:                 interrupt in order to avoid false alarms */
+  761:              if(SPIS & mSPIxS_SPRF_c)
+  762:              {
+  763:                SPID;
+  764:              }          
+  765:              
+  766:              /* Enable the Receive Interrupt */
+  767:              SPIC1 |= mSPIxC1_SPIE_c;          
+  768:                        
+  769:              /* Initiate a dummy transmission; this will also initiate the reception over the SPI bus */
+  770:              SPID = 0x00;                         
+  771:            }
+  772:          }      
+  773:        }
+  774:        else
+  775:        {
+  776:          retStatus = FALSE;
+  777:        }
+  778:            
+  779:        return retStatus;     
+  780:      #else
+  781:        (void) pBuf;
+  782:        (void) bufLen;
+  783:        (void) pfCallBack;
+  784:        
+  785:        return TRUE;
+  0000 a601     [2]             LDA   #1
+  786:      #endif
+  787:    }
+  0002 8d       [7]             RTC   
+  788:  #endif
+  789:  
+  790:  
+  791:  /******************************************************************************
+  792:  *  SPI2_MasterReceive
+  793:  *
+  794:  *  Begin reception of a 'bufLen' size bytes starting from the *pBuf   
+  795:  ******************************************************************************/
+  796:  #if defined(PROCESSOR_QE128)
+  797:    bool_t SPI2_MasterReceive(uint8_t *pBuf, index_t bufLen, void (*pfCallBack)(bool_t status))
+  798:    {   
+  799:      #if (gSPI_Enabled_d == TRUE) 
+  800:        bool_t retStatus = TRUE;
+  801:        
+  802:        if(gSpiConfig.devMode == gSPI_MasterMode_c)
+  803:        {
+  804:          /* Handle empty buffers. */
+  805:          if((!bufLen) || (pBuf == NULL)) 
+  806:          {
+  807:            /* Call the callback function (with the status FALSE), if it is a valid pointer to it */
+  808:            if(pfCallBack)
+  809:            {
+  810:              (*pfCallBack)(FALSE);
+  811:            }      
+  812:          }
+  813:          else
+  814:          {
+  815:            /* 'pfSpiMasterRxCallBack' is reset by Spi Task after the callback is called */
+  816:            /* If 'pfSpiMasterRxCallBack' is != 0 it means that the previous callback didn't run yet */
+  817:            if(pfSpiMasterRxCallBack)
+  818:            {
+  819:              retStatus = FALSE;
+  820:            }
+  821:            else
+  822:            {
+  823:              /* Update the variable storing the master operation and also the callback */
+  824:              mSpiMasterOp.spiOpType  = mSpi_OpType_Rx_c;
+  825:              mSpiMasterOp.pBuf       = (uint8_t*)pBuf;  
+  826:              mSpiMasterOp.bufLen     = bufLen;
+  827:              pfSpiMasterRxCallBack   = pfCallBack;   
+  828:              
+  829:              /* If the 3 wire operation is selected, then select the pin as input */
+  830:              if(gSpiConfig.s3Wire == gSPI_SingleWire_c)
+  831:              {
+  832:                SPI2C2 &= ~mSPIxC2_BIDIROE_c;
+  833:              } 
+  834:                       
+  835:              /* Assure that the SPI receive flag is cleared before enabling the receive 
+  836:                 interrupt in order to avoid false alarms */
+  837:              if(SPI2S & mSPIxS_SPRF_c)
+  838:              {
+  839:                SPI2D;
+  840:              }          
+  841:              
+  842:              /* Enable the Receive Interrupt */
+  843:              SPI2C1 |= mSPIxC1_SPIE_c;          
+  844:                        
+  845:              /* Initiate a dummy transmission; this will also initiate the reception over the SPI bus */
+  846:              SPI2D = 0x00;                         
+  847:            }
+  848:          }      
+  849:        }
+  850:        else
+  851:        {
+  852:          retStatus = FALSE;
+  853:        }
+  854:            
+  855:        return retStatus;  
+  856:      #else
+  857:        (void) pBuf;
+  858:        (void) bufLen;
+  859:        (void) pfCallBack;
+  860:        
+  861:        return TRUE;      
+  862:      #endif
+  863:    }
+  864:  #endif
+  865:  
+  866:  
+  867:  /******************************************************************************
+  868:  *  SPI1_SlaveTransmit
+  869:  *
+  870:  *  Begin transmission of a 'bufLen' size bytes starting from the *pBuf   
+  871:  ******************************************************************************/
+  872:  #if defined(PROCESSOR_MC1323X)
+  873:    bool_t SPI1_SlaveTransmit(uint8_t *pBuf, index_t bufLen, void (*pfCallBack)(uint8_t *pBuf))
+  874:    {
+  875:      #if (gSPI_Enabled_d == TRUE)
+  876:        bool_t retStatus = TRUE;
+  877:        
+  878:        if(gSpiConfig.devMode == gSPI_SlaveMode_c)
+  879:        {
+  880:          /* Handle empty buffers. */
+  881:          if(!bufLen)
+  882:          {
+  883:            /* Call the callback if the pointer to it, is valid */
+  884:            if(pfCallBack)
+  885:            {
+  886:              (*pfCallBack)(pBuf);               
+  887:            }
+  888:          }
+  889:          else
+  890:          {
+  891:            /* Room for one more? */
+  892:            if(maSpiTxBufRefTable[mSpiTxBufRefLeadingIndex].mTxBufLen)  
+  893:            {
+  894:              retStatus = FALSE;
+  895:            }
+  896:            else
+  897:            {
+  898:              /* Update the table ref. with pointer of the Tx buffer and the callback */
+  899:              maSpiTxBufRefTable[mSpiTxBufRefLeadingIndex].pTxBuf           = pBuf;
+  900:              maSpiTxBufRefTable[mSpiTxBufRefLeadingIndex].pfTxBufCallBack  = pfCallBack;
+  901:              /* Update the table with bufer lengths with the new element */
+  902:              maSpiTxBufRefTable[mSpiTxBufRefLeadingIndex].mTxBufLen        = bufLen;
+  903:              
+  904:              /* Increment the leading index and reset if exceed the number of Tx 
+  905:                 buffers in slave mode */
+  906:              if(++mSpiTxBufRefLeadingIndex >= gSPI_SlaveTransmitBuffersNo_c)
+  907:              {
+  908:                mSpiTxBufRefLeadingIndex = 0; 
+  909:              }
+  910:              
+  911:              /* Enable the Transmit Interrupt */ 
+  912:              SPIC1 |= mSPIxC1_SPTIE_c;
+  913:            }
+  914:          }      
+  915:        }
+  916:        else
+  917:        {
+  918:          retStatus = FALSE;
+  919:        }
+  920:                  
+  921:        return retStatus; 
+  922:      #else
+  923:        (void) pBuf;
+  924:        (void) bufLen;
+  925:        (void) pfCallBack;
+  926:        
+  927:        return TRUE;
+  0000 a601     [2]             LDA   #1
+  928:      #endif
+  929:    }
+  0002 8d       [7]             RTC   
+  930:  #endif
+  931:  
+  932:   
+  933:  /******************************************************************************
+  934:  *  SPI2_SlaveTransmit
+  935:  *
+  936:  *  Begin transmission of a 'bufLen' size bytes starting from the *pBuf   
+  937:  ******************************************************************************/
+  938:  #if defined(PROCESSOR_QE128) 
+  939:    bool_t SPI2_SlaveTransmit(uint8_t *pBuf, index_t bufLen, void (*pfCallBack)(uint8_t *pBuf))
+  940:    {    
+  941:      #if (gSPI_Enabled_d == TRUE) 
+  942:        bool_t retStatus = TRUE;
+  943:          
+  944:        if(gSpiConfig.devMode == gSPI_SlaveMode_c)
+  945:        {
+  946:          /* Handle empty buffers. */
+  947:          if(!bufLen)
+  948:          {
+  949:            /* Call the callback if the pointer to it, is valid */
+  950:            if(pfCallBack)
+  951:            {
+  952:              (*pfCallBack)(pBuf);               
+  953:            }
+  954:          }
+  955:          else
+  956:          {
+  957:            /* Room for one more? */
+  958:            if(maSpiTxBufRefTable[mSpiTxBufRefLeadingIndex].mTxBufLen)  
+  959:            {
+  960:              retStatus = FALSE;
+  961:            }
+  962:            else
+  963:            {
+  964:              /* Update the table ref. with pointer of the Tx buffer and the callback */
+  965:              maSpiTxBufRefTable[mSpiTxBufRefLeadingIndex].pTxBuf           = pBuf;
+  966:              maSpiTxBufRefTable[mSpiTxBufRefLeadingIndex].pfTxBufCallBack  = pfCallBack;
+  967:              /* Update the table with bufer lengths with the new element */
+  968:              maSpiTxBufRefTable[mSpiTxBufRefLeadingIndex].mTxBufLen        = bufLen;
+  969:              
+  970:              /* Increment the leading index and reset if exceed the number of Tx 
+  971:                 buffers in slave mode */
+  972:              if(++mSpiTxBufRefLeadingIndex >= gSPI_SlaveTransmitBuffersNo_c)
+  973:              {
+  974:                mSpiTxBufRefLeadingIndex = 0; 
+  975:              }
+  976:              
+  977:              /* Enable the Transmit Interrupt */ 
+  978:              SPI2C1 |= mSPIxC1_SPTIE_c;
+  979:            }
+  980:          }      
+  981:        }
+  982:        else
+  983:        {
+  984:          retStatus = FALSE;
+  985:        }
+  986:                  
+  987:        return retStatus;  
+  988:      #else
+  989:        (void) pBuf;
+  990:        (void) bufLen;
+  991:        (void) pfCallBack;
+  992:        
+  993:        return TRUE;    
+  994:      #endif
+  995:    }
+  996:  #endif
+  997:  
+  998:   
+  999:  /******************************************************************************
+ 1000:  *  SPI1_GetByteFromBuffer
+ 1001:  *
+ 1002:  *  Retrieve a byte from the driver's Rx circular buffer and store it at *pDest.
+ 1003:  *  Return TRUE if a byte was retrieved; FALSE if the Rx buffer is empty.   
+ 1004:  ******************************************************************************/
+ 1005:  #if defined(PROCESSOR_MC1323X)
+ 1006:    bool_t SPI1_GetByteFromBuffer(uint8_t *pDst)
+ 1007:    {
+ 1008:      #if (gSPI_Enabled_d == TRUE)
+ 1009:        bool_t  retStatus = TRUE;
+ 1010:        uint8_t spiControlReg, var;
+ 1011:        
+ 1012:        if(!mSpiRxBufferByteCount)
+ 1013:        {
+ 1014:          retStatus = FALSE;
+ 1015:        }
+ 1016:        else
+ 1017:        {
+ 1018:          IrqControlLib_ProtectFromMC1323xIrq(var);      
+ 1019:          IrqControlLib_PushIrqStatus();
+ 1020:          /* Disable all interrupts */
+ 1021:          IrqControlLib_DisableAllIrqs();
+ 1022:          
+ 1023:          /* Store the Control Register */
+ 1024:          spiControlReg = SPIC1;
+ 1025:          /* Disable the SPI Rx interrupt while the counter is updated */
+ 1026:          SPIC1 &= ~mSPIxC1_SPIE_c;
+ 1027:          
+ 1028:          IrqControlLib_PullIrqStatus();
+ 1029:          
+ 1030:          /* Pick-up the byte from the Rx buffer and store it in the location pointed by 'pDst' */
+ 1031:          *pDst = maSpiRxBuf[mSpiRxBufTrailingIndex];
+ 1032:          /* Update the Rx buffer trailing index */
+ 1033:          if(++mSpiRxBufTrailingIndex >= gSPI_SlaveReceiveBufferSize_c)
+ 1034:          {
+ 1035:            mSpiRxBufTrailingIndex = 0; 
+ 1036:          }
+ 1037:          
+ 1038:          /* Decrement the number of bytes left */
+ 1039:          --mSpiRxBufferByteCount;
+ 1040:          
+ 1041:          /* Restore the SPI Control Register */
+ 1042:          SPIC1 = spiControlReg;
+ 1043:          IrqControlLib_UnprotectFromMC1323xIrq(var);
+ 1044:        }
+ 1045:        
+ 1046:        return retStatus; 
+ 1047:      #else
+ 1048:        (void) pDst;
+ 1049:        
+ 1050:        return TRUE;
+  0000 a601     [2]             LDA   #1
+ 1051:      #endif
+ 1052:    }
+  0002 8d       [7]             RTC   
+ 1053:  #endif
+ 1054:  
+ 1055:  
+ 1056:  /******************************************************************************
+ 1057:  *  SPI2_GetByteFromBuffer
+ 1058:  *
+ 1059:  *  Retrieve a byte from the driver's Rx circular buffer and store it at *pDest.
+ 1060:  *  Return TRUE if a byte was retrieved; FALSE if the Rx buffer is empty.   
+ 1061:  ******************************************************************************/
+ 1062:  #if defined(PROCESSOR_QE128)
+ 1063:    bool_t SPI2_GetByteFromBuffer(uint8_t *pDst)
+ 1064:    {          
+ 1065:      #if (gSPI_Enabled_d == TRUE)
+ 1066:        bool_t  retStatus = TRUE;
+ 1067:        uint8_t spiControlReg;
+ 1068:        
+ 1069:        if(!mSpiRxBufferByteCount)
+ 1070:        {
+ 1071:          retStatus = FALSE;
+ 1072:        }
+ 1073:        else
+ 1074:        {      
+ 1075:          IrqControlLib_PushIrqStatus();
+ 1076:          /* Disable all interrupts */
+ 1077:          IrqControlLib_DisableAllIrqs();
+ 1078:          
+ 1079:          /* Store the Control Register */
+ 1080:          spiControlReg = SPI2C1;
+ 1081:          /* Disable the SPI Rx interrupt while the counter is updated */
+ 1082:          SPI2C1 &= ~mSPIxC1_SPIE_c;
+ 1083:          
+ 1084:          IrqControlLib_PullIrqStatus();
+ 1085:          
+ 1086:          /* Pick-up the byte from the Rx buffer and store it in the location pointed by 'pDst' */
+ 1087:          *pDst = maSpiRxBuf[mSpiRxBufTrailingIndex];
+ 1088:          /* Update the Rx buffer trailing index */
+ 1089:          if(++mSpiRxBufTrailingIndex >= gSPI_SlaveReceiveBufferSize_c)
+ 1090:          {
+ 1091:            mSpiRxBufTrailingIndex = 0; 
+ 1092:          }
+ 1093:          
+ 1094:          /* Decrement the number of bytes left */
+ 1095:          --mSpiRxBufferByteCount;
+ 1096:          
+ 1097:          /* Restore the SPI Control Register */
+ 1098:          SPI2C1 = spiControlReg;
+ 1099:        }
+ 1100:        
+ 1101:        return retStatus;  
+ 1102:      #else
+ 1103:        (void) pDst;
+ 1104:        
+ 1105:        return TRUE;    
+ 1106:      #endif
+ 1107:    }
+ 1108:  #endif
+ 1109:  
+ 1110:  #if(gSPI_Enabled_d == TRUE)
+ 1111:    /******************************************************************************
+ 1112:    *  SPI_Task
+ 1113:    *
+ 1114:    *  Main task of the SPI module 
+ 1115:    ******************************************************************************/
+ 1116:    static void SPI_Task(event_t events)
+ 1117:    { 
+ 1118:      void (*pfTxCallBack)(uint8_t *pTxBuf);
+ 1119:      
+ 1120:      /* Master Tx success event */
+ 1121:      if(events & gSPI_Event_MasterTxSuccess_c)
+ 1122:      {
+ 1123:        /* Run the master Tx callback with TRUE as status argument then invalidate it */
+ 1124:        (*pfSpiMasterTxCallBack)(TRUE);
+ 1125:        pfSpiMasterTxCallBack = NULL;
+ 1126:      }
+ 1127:      
+ 1128:      /* Master Tx fail event */
+ 1129:      if(events & gSPI_Event_MasterTxFail_c)
+ 1130:      {
+ 1131:        /* Run the master Tx callback with FALSE as status argument then invalidate it */
+ 1132:        (*pfSpiMasterTxCallBack)(FALSE);
+ 1133:        pfSpiMasterTxCallBack = NULL;      
+ 1134:      }
+ 1135:      
+ 1136:      /* Master Rx success event */
+ 1137:      if(events & gSPI_Event_MasterRxSuccess_c)
+ 1138:      {
+ 1139:        /* Run the master Rx callback with TRUE as status argument then invalidate it */
+ 1140:        (*pfSpiMasterRxCallBack)(TRUE);
+ 1141:        pfSpiMasterRxCallBack = NULL;      
+ 1142:      }
+ 1143:      
+ 1144:      /* Master Rx fail event */
+ 1145:      if(events & gSPI_Event_MasterRxFail_c)
+ 1146:      {
+ 1147:        /* Run the master Rx callback with FALSE as status argument then invalidate it */
+ 1148:        (*pfSpiMasterRxCallBack)(FALSE);
+ 1149:        pfSpiMasterRxCallBack = NULL;      
+ 1150:      }    
+ 1151:      
+ 1152:      /* Slave Tx event */
+ 1153:      if(events & gSPI_Event_SlaveTx_c)
+ 1154:      {
+ 1155:        /* Run through the callback table and execute any pending callbacks */
+ 1156:        while(maSpiTxCallbackTrailingIndex != maSpiTxCallbackLeadingIndex)
+ 1157:        {
+ 1158:          pfTxCallBack = maSpiTxCallbackTable[maSpiTxCallbackTrailingIndex].pfTxCallBack;
+ 1159:          /* Call callback with buffer info as parameter */
+ 1160:          (*pfTxCallBack)(maSpiTxCallbackTable[maSpiTxCallbackTrailingIndex].pTxBuf);
+ 1161:          
+ 1162:          /* Increment and wrap around the callback trailing index */
+ 1163:          if(++maSpiTxCallbackTrailingIndex >= gSPI_SlaveTransmitBuffersNo_c)
+ 1164:          {
+ 1165:            maSpiTxCallbackTrailingIndex = 0;
+ 1166:          }
+ 1167:        }
+ 1168:      }
+ 1169:      
+ 1170:      /* Slave Rx event */
+ 1171:      if(events & gSPI_Event_SlaveRx_c)
+ 1172:      {
+ 1173:        pfSpiSlaveRxCallBack();  
+ 1174:      }        
+ 1175:    }
+ 1176:  #endif
+ 1177:  
+ 1178:  /******************************************************************************
+ 1179:  *  SPI_Isr
+ 1180:  *
+ 1181:  *  SPI Interrupt service Routine
+ 1182:  ******************************************************************************/
+ 1183:  /* Place it in NON_BANKED memory */
+ 1184:  #ifdef MEMORY_MODEL_BANKED
+ 1185:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+ 1186:  #else
+ 1187:  #pragma CODE_SEG DEFAULT
+ 1188:  #endif  /* MEMORY_MODEL_BANKED */
+ 1189:  
+ 1190:  #if defined(PROCESSOR_MC1323X)
+ 1191:    INTERRUPT_KEYWORD void SPI_Isr(void)
+ 1192:    {
+ 1193:      #if (gSPI_Enabled_d == TRUE)
+ 1194:        volatile uint8_t spiStatusReg;
+ 1195:        //volatile uint8_t iCnt;
+ 1196:      
+ 1197:        /* Read the SPI Status Register */
+ 1198:        spiStatusReg = SPIS; 
+ 1199:          
+ 1200:        /* Check if the interrupt is caused by a transmission buffer empty */
+ 1201:        if((spiStatusReg & mSPIxS_SPTEF_c) && (SPIC1 & mSPIxC1_SPTIE_c))
+ 1202:        {  /* Tx */
+ 1203:          /* Check the mode of operation: master or slave */
+ 1204:          if(SPIC1 & mSPIxC1_MSTR_c)
+ 1205:          { /* Master mode */
+ 1206:            if(mSpiMasterOp.spiOpType == mSpi_OpType_Tx_c)     
+ 1207:            {
+ 1208:              if(mSpiMasterOp.bufLen)
+ 1209:              {
+ 1210:                /* Initiate an SPI Transmission; Writting the SPI Data Register 
+ 1211:                   will also clear the SPTEF flag */
+ 1212:                SPID = *mSpiMasterOp.pBuf++;
+ 1213:                
+ 1214:                /* Decrement the buffer length */
+ 1215:                mSpiMasterOp.bufLen--;                          
+ 1216:              }
+ 1217:              else
+ 1218:              {
+ 1219:                /* Disable the Transmit Interrupt */
+ 1220:                SPIC1 &= ~mSPIxC1_SPTIE_c;
+ 1221:                                       
+ 1222:                if(pfSpiMasterTxCallBack)
+ 1223:                {
+ 1224:                  /* Send event to the SPI Task with successfull Tx status (only if 
+ 1225:                     there is a valid master Tx callback) */
+ 1226:                  TS_SendEvent(gSpiTaskId, gSPI_Event_MasterTxSuccess_c);              
+ 1227:                }
+ 1228:              }
+ 1229:            }
+ 1230:            else
+ 1231:            {
+ 1232:              if(pfSpiMasterTxCallBack)
+ 1233:              {
+ 1234:                /* Send an event to the SPI Task with fail Tx status (only if there 
+ 1235:                   is a valid master Tx callback) */
+ 1236:                TS_SendEvent(gSpiTaskId, gSPI_Event_MasterTxFail_c);              
+ 1237:              }          
+ 1238:            }
+ 1239:          }
+ 1240:          else
+ 1241:          {       
+ 1242:            /* Disable the Transmit Interrupt if and only if there is no data to be send */
+ 1243:            if((mSpiTxBufRefTrailingIndex == mSpiTxBufRefLeadingIndex) && !(maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].mTxBufLen))
+ 1244:            {
+ 1245:  
+ 1246:              SPIC1 &= ~mSPIxC1_SPTIE_c;
+ 1247:              #if gSPI_Slave_TxDataAvailableSignal_Enable_c
+ 1248:                SPI_SignalTxDataAvailable(FALSE);
+ 1249:              #endif 
+ 1250:            }
+ 1251:            else
+ 1252:            {        
+ 1253:              /* Slave mode */
+ 1254:              SPI1_SlaveSendNextByte();
+ 1255:            }
+ 1256:          }      
+ 1257:        }
+ 1258:        
+ 1259:        /* Check if the interrupt is caused by a reception buffer full */
+ 1260:        if((spiStatusReg & mSPIxS_SPRF_c) && (SPIC1 & mSPIxC1_SPIE_c))
+ 1261:        { /* Rx */
+ 1262:          /* Check the mode of operation: master or slave */
+ 1263:          if(SPIC1 & mSPIxC1_MSTR_c)
+ 1264:          { /* Master mode */
+ 1265:            if(mSpiMasterOp.spiOpType == mSpi_OpType_Rx_c)
+ 1266:            {
+ 1267:              /* Read the received data (from SPI Data Register); this will also 
+ 1268:                 clear the SPRF flag */
+ 1269:              *mSpiMasterOp.pBuf++ = SPID;
+ 1270:                
+ 1271:              /* Decrement the buffer length */
+ 1272:              mSpiMasterOp.bufLen--;          
+ 1273:              
+ 1274:              if(mSpiMasterOp.bufLen)
+ 1275:              {                          
+ 1276:                /* Initiate the next reception */
+ 1277:                SPID = 0x00;                      
+ 1278:              }
+ 1279:              else
+ 1280:              {
+ 1281:                /* Disable the Receive Interrupt */
+ 1282:                SPIC1 &= ~mSPIxC1_SPIE_c;                              
+ 1283:                
+ 1284:                if(pfSpiMasterRxCallBack)
+ 1285:                {
+ 1286:                  /* Send an event to the SPI Task with success Rx status (only if 
+ 1287:                     there is a valid master Rx callback) */
+ 1288:                  TS_SendEvent(gSpiTaskId, gSPI_Event_MasterRxSuccess_c);
+ 1289:                }
+ 1290:              }
+ 1291:            }
+ 1292:            else
+ 1293:            {
+ 1294:              if(pfSpiMasterRxCallBack)
+ 1295:              {
+ 1296:                /* Send an event to the SPI Task with fail Rx status (only if there
+ 1297:                   is a valid master Rx callback) */
+ 1298:                TS_SendEvent(gSpiTaskId, gSPI_Event_MasterRxFail_c);            
+ 1299:              }            
+ 1300:            }        
+ 1301:          }
+ 1302:          else
+ 1303:          { /* Slave mode */
+ 1304:            /* Put the received byte in the Rx buffer */
+ 1305:            if(pfSpiSlaveRxCallBack)  
+ 1306:            {
+ 1307:              maSpiRxBuf[mSpiRxBufLeadingIndex] = SPID;
+ 1308:              
+ 1309:              /* Update the Rx buffer leading index */
+ 1310:              if(++mSpiRxBufLeadingIndex >= gSPI_SlaveReceiveBufferSize_c)
+ 1311:              {
+ 1312:                mSpiRxBufLeadingIndex = 0; 
+ 1313:              }
+ 1314:              
+ 1315:              /* Update the Rx buffer byte count */
+ 1316:              if(mSpiRxBufferByteCount < gSPI_SlaveReceiveBufferSize_c)
+ 1317:              {
+ 1318:                mSpiRxBufferByteCount++;
+ 1319:              }
+ 1320:              else
+ 1321:              {
+ 1322:                /* If the number of bytes to be read exceed the Rx buffer size then
+ 1323:                   update also the trailing index */
+ 1324:                if(++mSpiRxBufTrailingIndex >= gSPI_SlaveReceiveBufferSize_c)
+ 1325:                {
+ 1326:                  mSpiRxBufTrailingIndex = 0;
+ 1327:                }
+ 1328:              }
+ 1329:              
+ 1330:              /* Let the application know a byte has been receive. */
+ 1331:              TS_SendEvent(gSpiTaskId, gSPI_Event_SlaveRx_c);  
+ 1332:            }
+ 1333:            else
+ 1334:            {
+ 1335:              /* Dummy read of the SPI Data Register in order to clear the SPRF flag */
+ 1336:              SPID;
+ 1337:            }
+ 1338:          }      
+ 1339:        }
+ 1340:        
+ 1341:        /* Check if the interrupt is caused by a mode fault event */
+ 1342:        if((spiStatusReg & mSPIxS_MODF_c) && (SPIC1 & mSPIxC1_SPIE_c))
+ 1343:        { /* MODF */
+ 1344:          /* Check the mode of operation: master or slave */
+ 1345:          if(SPIC1 & mSPIxC1_MSTR_c)
+ 1346:          { /* Master mode */
+ 1347:            /* Turn the SPI module in slave mode. Writting to the SPIxC1 will also 
+ 1348:               clear the MODF flag */
+ 1349:            SPIC1 &= ~mSPIxC1_MSTR_c;
+ 1350:          }    
+ 1351:        }
+ 1352:        
+ 1353:      #endif
+ 1354:    }
+  0000 80       [9]             RTI   
+ 1355:  #endif  
+ 1356:  
+ 1357:  #if defined(PROCESSOR_QE128)
+ 1358:    INTERRUPT_KEYWORD void SPI2_Isr(void)
+ 1359:    {        
+ 1360:      #if (gSPI_Enabled_d == TRUE)
+ 1361:        volatile uint8_t spiStatusReg;
+ 1362:        //volatile uint8_t iCnt;
+ 1363:      
+ 1364:        /* Read the SPI Status Register */
+ 1365:        spiStatusReg = SPI2S; 
+ 1366:          
+ 1367:        /* Check if the interrupt is caused by a transmission buffer empty */
+ 1368:        if((spiStatusReg & mSPIxS_SPTEF_c) && (SPI2C1 & mSPIxC1_SPTIE_c))
+ 1369:        {  /* Tx */
+ 1370:          /* Check the mode of operation: master or slave */
+ 1371:          if(SPI2C1 & mSPIxC1_MSTR_c)
+ 1372:          { /* Master mode */
+ 1373:            if(mSpiMasterOp.spiOpType == mSpi_OpType_Tx_c)     
+ 1374:            {
+ 1375:              if(mSpiMasterOp.bufLen)
+ 1376:              {
+ 1377:                /* Initiate an SPI Transmission; Writting the SPI Data Register 
+ 1378:                   will also clear the SPTEF flag */
+ 1379:                SPI2D = *mSpiMasterOp.pBuf++;
+ 1380:                
+ 1381:                /* Decrement the buffer length */
+ 1382:                mSpiMasterOp.bufLen--;                          
+ 1383:              }
+ 1384:              else
+ 1385:              {
+ 1386:                /* Disable the Transmit Interrupt */
+ 1387:                SPI2C1 &= ~mSPIxC1_SPTIE_c;
+ 1388:                                       
+ 1389:                if(pfSpiMasterTxCallBack)
+ 1390:                {
+ 1391:                  /* Send event to the SPI Task with successfull Tx status (only if 
+ 1392:                     there is a valid master Tx callback) */
+ 1393:                  TS_SendEvent(gSpiTaskId, gSPI_Event_MasterTxSuccess_c);              
+ 1394:                }
+ 1395:              }
+ 1396:            }
+ 1397:            else
+ 1398:            {
+ 1399:              if(pfSpiMasterTxCallBack)
+ 1400:              {
+ 1401:                /* Send an event to the SPI Task with fail Tx status (only if there 
+ 1402:                   is a valid master Tx callback) */
+ 1403:                TS_SendEvent(gSpiTaskId, gSPI_Event_MasterTxFail_c);              
+ 1404:              }          
+ 1405:            }
+ 1406:          }
+ 1407:          else
+ 1408:          {       
+ 1409:            /* Disable the Transmit Interrupt if and only if there is no data to be send */
+ 1410:            if((mSpiTxBufRefTrailingIndex == mSpiTxBufRefLeadingIndex) && !(maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].mTxBufLen))
+ 1411:            {
+ 1412:  
+ 1413:              SPI2C1 &= ~mSPIxC1_SPTIE_c;
+ 1414:              #if gSPI_Slave_TxDataAvailableSignal_Enable_c
+ 1415:                SPI_SignalTxDataAvailable(FALSE);
+ 1416:              #endif 
+ 1417:            }
+ 1418:            else
+ 1419:            {        
+ 1420:              /* Slave mode */
+ 1421:              SPI2_SlaveSendNextByte();
+ 1422:            }
+ 1423:          }      
+ 1424:        }
+ 1425:        
+ 1426:        /* Check if the interrupt is caused by a reception buffer full */
+ 1427:        if((spiStatusReg & mSPIxS_SPRF_c) && (SPI2C1 & mSPIxC1_SPIE_c))
+ 1428:        { /* Rx */
+ 1429:          /* Check the mode of operation: master or slave */
+ 1430:          if(SPI2C1 & mSPIxC1_MSTR_c)
+ 1431:          { /* Master mode */
+ 1432:            if(mSpiMasterOp.spiOpType == mSpi_OpType_Rx_c)
+ 1433:            {
+ 1434:              /* Read the received data (from SPI Data Register); this will also 
+ 1435:                 clear the SPRF flag */
+ 1436:              *mSpiMasterOp.pBuf++ = SPI2D;
+ 1437:                
+ 1438:              /* Decrement the buffer length */
+ 1439:              mSpiMasterOp.bufLen--;          
+ 1440:              
+ 1441:              if(mSpiMasterOp.bufLen)
+ 1442:              {                          
+ 1443:                /* Initiate the next reception */
+ 1444:                SPI2D = 0x00;                      
+ 1445:              }
+ 1446:              else
+ 1447:              {
+ 1448:                /* Disable the Receive Interrupt */
+ 1449:                SPI2C1 &= ~mSPIxC1_SPIE_c;                              
+ 1450:                
+ 1451:                if(pfSpiMasterRxCallBack)
+ 1452:                {
+ 1453:                  /* Send an event to the SPI Task with success Rx status (only if 
+ 1454:                     there is a valid master Rx callback) */
+ 1455:                  TS_SendEvent(gSpiTaskId, gSPI_Event_MasterRxSuccess_c);
+ 1456:                }
+ 1457:              }
+ 1458:            }
+ 1459:            else
+ 1460:            {
+ 1461:              if(pfSpiMasterRxCallBack)
+ 1462:              {
+ 1463:                /* Send an event to the SPI Task with fail Rx status (only if there
+ 1464:                   is a valid master Rx callback) */
+ 1465:                TS_SendEvent(gSpiTaskId, gSPI_Event_MasterRxFail_c);            
+ 1466:              }            
+ 1467:            }        
+ 1468:          }
+ 1469:          else
+ 1470:          { /* Slave mode */
+ 1471:            /* Put the received byte in the Rx buffer */
+ 1472:            if(pfSpiSlaveRxCallBack)  
+ 1473:            {
+ 1474:              maSpiRxBuf[mSpiRxBufLeadingIndex] = SPI2D;
+ 1475:              
+ 1476:              /* Update the Rx buffer leading index */
+ 1477:              if(++mSpiRxBufLeadingIndex >= gSPI_SlaveReceiveBufferSize_c)
+ 1478:              {
+ 1479:                mSpiRxBufLeadingIndex = 0; 
+ 1480:              }
+ 1481:              
+ 1482:              /* Update the Rx buffer byte count */
+ 1483:              if(mSpiRxBufferByteCount < gSPI_SlaveReceiveBufferSize_c)
+ 1484:              {
+ 1485:                mSpiRxBufferByteCount++;
+ 1486:              }
+ 1487:              else
+ 1488:              {
+ 1489:                /* If the number of bytes to be read exceed the Rx buffer size then
+ 1490:                   update also the trailing index */
+ 1491:                if(++mSpiRxBufTrailingIndex >= gSPI_SlaveReceiveBufferSize_c)
+ 1492:                {
+ 1493:                  mSpiRxBufTrailingIndex = 0;
+ 1494:                }
+ 1495:              }
+ 1496:              
+ 1497:              /* Let the application know a byte has been receive. */
+ 1498:              TS_SendEvent(gSpiTaskId, gSPI_Event_SlaveRx_c);  
+ 1499:            }
+ 1500:            else
+ 1501:            {
+ 1502:              /* Dummy read of the SPI Data Register in order to clear the SPRF flag */
+ 1503:              SPI2D;
+ 1504:            }
+ 1505:          }      
+ 1506:        }
+ 1507:      
+ 1508:        /* Check if the interrupt is caused by a mode fault event */
+ 1509:        if((spiStatusReg & mSPIxS_MODF_c) && (SPI2C1 & mSPIxC1_SPIE_c))
+ 1510:        { /* MODF */
+ 1511:          /* Check the mode of operation: master or slave */
+ 1512:          if(SPI2C1 & mSPIxC1_MSTR_c)
+ 1513:          { /* Master mode */
+ 1514:            /* Turn the SPI module in slave mode. Writting to the SPIxC1 will also 
+ 1515:               clear the MODF flag */
+ 1516:            SPI2C1 &= ~mSPIxC1_MSTR_c;
+ 1517:          }    
+ 1518:        } 
+ 1519:      #endif      
+ 1520:    }
+ 1521:  #endif
+ 1522:  
+ 1523:  #pragma CODE_SEG DEFAULT
+ 1524:  
+ 1525:  /******************************************************************************
+ 1526:  *******************************************************************************
+ 1527:  * Private functions 
+ 1528:  *******************************************************************************
+ 1529:  ******************************************************************************/
+ 1530:  #if(gSPI_Enabled_d == TRUE)
+ 1531:    /******************************************************************************
+ 1532:    *  SPI1_SlaveSendNextByte
+ 1533:    *
+ 1534:    *  Send the next byte when the SPI is in slave transmit; it also manages the 
+ 1535:    *  Tx circular buffers 
+ 1536:    ******************************************************************************/
+ 1537:    #if defined(PROCESSOR_MC1323X)
+ 1538:      static void SPI1_SlaveSendNextByte(void)
+ 1539:      {
+ 1540:        void (*pfSpiCallBack)(uint8_t *pBuf);
+ 1541:        
+ 1542:        if(maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].mTxBufLen)
+ 1543:        {
+ 1544:          /* Write a byte */
+ 1545:          SPID = maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].pTxBuf[mSpiTxBufRefCurIndex]; 
+ 1546:          
+ 1547:          #if gSPI_Slave_TxDataAvailableSignal_Enable_c
+ 1548:            SPI_SignalTxDataAvailable(TRUE);
+ 1549:          #endif
+ 1550:           
+ 1551:          /* Finished with this buffer? */
+ 1552:          if(++mSpiTxBufRefCurIndex >= maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].mTxBufLen)
+ 1553:          {
+ 1554:            /* Mark this one as done and call the callback */
+ 1555:            maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].mTxBufLen = 0;
+ 1556:            pfSpiCallBack = maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].pfTxBufCallBack;
+ 1557:            
+ 1558:            if(pfSpiCallBack)
+ 1559:            {        
+ 1560:              /* Add the callback information to the callback table */
+ 1561:              maSpiTxCallbackTable[maSpiTxCallbackLeadingIndex].pfTxCallBack  = pfSpiCallBack;
+ 1562:              maSpiTxCallbackTable[maSpiTxCallbackLeadingIndex].pTxBuf        = maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].pTxBuf;
+ 1563:              
+ 1564:              /* Increment and wrap around the Tx callback leading index */
+ 1565:              if(++maSpiTxCallbackLeadingIndex >= gSPI_SlaveTransmitBuffersNo_c)
+ 1566:              {
+ 1567:                maSpiTxCallbackLeadingIndex = 0;
+ 1568:              }
+ 1569:              
+ 1570:              /* Signal the SPI Task that we got a callback to be executed */
+ 1571:              TS_SendEvent(gSpiTaskId, gSPI_Event_SlaveTx_c);         
+ 1572:            }
+ 1573:            
+ 1574:            /* Reset the character count */
+ 1575:            mSpiTxBufRefCurIndex = 0;
+ 1576:            
+ 1577:            /* Increment and wrap around the trailing index */
+ 1578:            if(++mSpiTxBufRefTrailingIndex >= gSPI_SlaveTransmitBuffersNo_c)
+ 1579:            {
+ 1580:              mSpiTxBufRefTrailingIndex = 0;  
+ 1581:            }    
+ 1582:          }       
+ 1583:        }
+ 1584:        else
+ 1585:        {
+ 1586:          /* Write a dummy byte in order to clear the SPTEF flag */
+ 1587:          SPID = 0x00;     
+ 1588:        }
+ 1589:                 
+ 1590:      }
+ 1591:    #endif
+ 1592:    
+ 1593:   
+ 1594:    /******************************************************************************
+ 1595:    *  SPI2_SlaveSendNextByte
+ 1596:    *
+ 1597:    *  Send the next byte when the SPI is in slave transmit; it also manages the 
+ 1598:    *  Tx circular buffers 
+ 1599:    ******************************************************************************/ 
+ 1600:    #if defined(PROCESSOR_QE128)
+ 1601:      static void SPI2_SlaveSendNextByte(void)
+ 1602:      {
+ 1603:        void (*pfSpiCallBack)(uint8_t *pBuf);
+ 1604:        
+ 1605:        if(maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].mTxBufLen)
+ 1606:        {
+ 1607:          /* Write a byte */
+ 1608:          SPI2D = maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].pTxBuf[mSpiTxBufRefCurIndex]; 
+ 1609:          
+ 1610:          #if gSPI_Slave_TxDataAvailableSignal_Enable_c
+ 1611:            SPI_SignalTxDataAvailable(TRUE);
+ 1612:          #endif
+ 1613:           
+ 1614:          /* Finished with this buffer? */
+ 1615:          if(++mSpiTxBufRefCurIndex >= maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].mTxBufLen)
+ 1616:          {
+ 1617:            /* Mark this one as done and call the callback */
+ 1618:            maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].mTxBufLen = 0;
+ 1619:            pfSpiCallBack = maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].pfTxBufCallBack;
+ 1620:            
+ 1621:            if(pfSpiCallBack)
+ 1622:            {        
+ 1623:              /* Add the callback information to the callback table */
+ 1624:              maSpiTxCallbackTable[maSpiTxCallbackLeadingIndex].pfTxCallBack  = pfSpiCallBack;
+ 1625:              maSpiTxCallbackTable[maSpiTxCallbackLeadingIndex].pTxBuf        = maSpiTxBufRefTable[mSpiTxBufRefTrailingIndex].pTxBuf;
+ 1626:              
+ 1627:              /* Increment and wrap around the Tx callback leading index */
+ 1628:              if(++maSpiTxCallbackLeadingIndex >= gSPI_SlaveTransmitBuffersNo_c)
+ 1629:              {
+ 1630:                maSpiTxCallbackLeadingIndex = 0;
+ 1631:              }
+ 1632:              
+ 1633:              /* Signal the SPI Task that we got a callback to be executed */
+ 1634:              TS_SendEvent(gSpiTaskId, gSPI_Event_SlaveTx_c);         
+ 1635:            }
+ 1636:            
+ 1637:            /* Reset the character count */
+ 1638:            mSpiTxBufRefCurIndex = 0;
+ 1639:            
+ 1640:            /* Increment and wrap around the trailing index */
+ 1641:            if(++mSpiTxBufRefTrailingIndex >= gSPI_SlaveTransmitBuffersNo_c)
+ 1642:            {
+ 1643:              mSpiTxBufRefTrailingIndex = 0;  
+ 1644:            }    
+ 1645:          }       
+ 1646:        }
+ 1647:        else
+ 1648:        {
+ 1649:          /* Write a dummy byte in order to clear the SPTEF flag */
+ 1650:          SPI2D = 0x00;     
+ 1651:        }
+ 1652:                 
+ 1653:      }
+ 1654:    #endif  
+ 1655:  #endif /*(gSPI_Enabled_d == TRUE)*/
+ 1656:  

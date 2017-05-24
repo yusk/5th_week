@@ -1,0 +1,289 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * This module implements the memory allocation, list, and message modules. The memory 
+    3:  * allocation is build around N (1-4) pools with various memory allocation unit (block)
+    4:  * sizes. Each pool consists of an anchor with head and tail pointers. The memory blocks
+    5:  * are all linked to the anchor using a single chained list. Thus each block has a next
+    6:  * pointer. The user of the functions in this module never has to be concerned with the
+    7:  * list overhead since this is handled transparently. The block pointer which the user
+    8:  * receives when allocating memory is pointing to the address after the next-pointer.
+    9:  *
+   10:  * FIFO Queues are implemented using the same list functions as used by the memory
+   11:  * (de)allocation functions. The queue data object is simply an anchor (anchor_t).
+   12:  * List_AddTail is used for putting allocated blocks on the queue, and List_RemoveHead
+   13:  * will detach the block from the queue. Before using a queue anchor it must have been
+   14:  * initialized with List_ClearAnchor. No extra header is required in order to put a
+   15:  * block in a queue. However, messages should contain type information beside the
+   16:  * message data so that the message handler at the receiver can reckognize the message.
+   17:  *
+   18:  * Messages are sent by allocating a block using MSG_Alloc, and 
+   19:  * call the Service Access Point (SAP) of the receiver. If the SAP handles specific
+   20:  * messages synchronously (returns with result immideately) then the block may be
+   21:  * allocated on the stack of the calling function. The message types which allows this
+   22:  * are specified in the design documents.
+   23:  *
+   24:  * Copyright (c) 2006, Freescale, Inc.  All rights reserved.
+   25:  *
+   26:  * No part of this document must be reproduced in any form - including copied,
+   27:  * transcribed, printed or by any electronic means - without specific written
+   28:  * permission from Freescale Semiconductor.
+   29:  *************************************************************************************/
+   30:  #include "MsgSystem.h"
+   31:  
+   32:  /************************************************************************************
+   33:  *************************************************************************************
+   34:  * Private memory declarations
+   35:  *************************************************************************************
+   36:  ************************************************************************************/
+   37:  
+   38:    // The heap for MAC, NWK and application memory blocks.
+   39:  uint8_t maMacHeap[mMmTotalPoolSize_c];
+   40:  
+   41:    // Memory pool info and anchors.
+   42:  pools_t maMmPools[gMmNumPools_c];
+   43:  
+   44:    // Const array used during initialization. Describes the memory layout.
+   45:    // Pools must occur in the table in ascending order according to their size.
+   46:    // If coordinator capability is required, then there must always exist an
+   47:    // extra MAC pool for receiving data frames. This pool is private to the MAC.
+   48:    // An example of a memory layout for coordinators/routers:
+   49:    // Pool3]:
+   50:    //   SmallMessages[M], // Command messages of each ~22 bytes
+   51:    //   BigMessages[N-1], // Data messages of each ~134 bytes
+   52:    //   BigMessages[1],   // One data message of ~134 bytes, MAC private.
+   53:    // MSG_Alloc ensures that only the MAC has access to the private pool.
+   54:  
+   55:    // An example of a memory layout for devices:
+   56:    // Pool2]:
+   57:    //   SmallMessages[M], // Command messages of each ~22 bytes
+   58:    //   BigMessages[N],   // Data messages of each ~134 bytes
+   59:    //
+   60:  const poolInfo_t poolInfo[gMmNumPools_c] = {
+   61:    gMmPoolSize0_c, mMmBlockSize0_c, mMmBlockSize1_c,
+   62:  #if gMmNumPools_c > 1
+   63:    gMmPoolSize1_c, mMmBlockSize1_c, mMmBlockSize2_c,
+   64:  #if gMmNumPools_c > 2
+   65:    gMmPoolSize2_c, mMmBlockSize2_c, 0, 
+   66:  #if gMmNumPools_c > 3
+   67:    gMmPoolSize3_c, mMmBlockSize3_c, 0
+   68:  #endif // gMmNumPools_c > 3
+   69:  #endif // gMmNumPools_c > 2
+   70:  #endif // gMmNumPools_c > 1
+   71:  };
+   72:  
+   73:  const pools_t *pLastPool = &maMmPools[mMmLastPoolIdx_c];
+   74:  #if gBigMsgsMacOnly_d
+   75:    const pools_t *pSecondLastPool = &maMmPools[mMmLastPoolIdx_c-1];
+   76:  #endif
+   77:  
+   78:  #ifndef gMAC2006_d
+   79:    // Application allocated space for MAC PIB ACL Entry descriptors.
+   80:    #if gNumAclEntryDescriptors_c > 0
+   81:      aclEntryDescriptor_t gPIBaclEntryDescriptorSet[gNumAclEntryDescriptors_c];
+   82:  
+   83:       // Set number of ACL entries. Used by the MAC.
+   84:      const uint8_t gNumAclEntryDescriptors = gNumAclEntryDescriptors_c;
+   85:    #endif // gNumAclEntryDescriptors_c
+   86:  #else
+   87:    
+   88:    #if gNumKeyTableEntries_c > 0
+   89:      KeyDescriptor_t gPIBKeyTable[gNumKeyTableEntries_c];
+   90:      const uint8_t gNumKeyTableEntries = gNumKeyTableEntries_c;
+   91:      
+   92:      /* Allocate KeyIdLookupDescriptor_t, KeyDeviceDescriptor_t, KeyUsageDescriptor_t */ 
+   93:      /* These arrays are part of KeyDescriptor_t structure */
+   94:      /* Allocate a continuous space for each array based on the gNumKeyTableEntries_c */
+   95:      /* The MAC PIB will initialize the pointers accordingly */
+   96:      
+   97:      #if gNumKeyIdLookupEntries_c > 0
+   98:         KeyIdLookupDescriptor_t gPIBKeyIdLookupDescriptorTable[gNumKeyIdLookupEntries_c * gNumKeyTableEntries_c];
+   99:         const uint8_t gNumKeyIdLookupEntries = gNumKeyIdLookupEntries_c; /* The number of elements in each virtual array inside the gPIBKeyIdLookupDescriptorTable */
+  100:      #endif //gNumKeyIdLookupEntries_c
+  101:      
+  102:      #if gNumKeyDeviceListEntries_c > 0
+  103:         KeyDeviceDescriptor_t  gPIBKeyDeviceDescriptorTable[gNumKeyDeviceListEntries_c * gNumKeyTableEntries_c];
+  104:         const uint8_t gNumKeyDeviceListEntries = gNumKeyDeviceListEntries_c; /* The number of elements for each virtual array inside the gPIBKeyDeviceDescriptorTable */
+  105:      #endif //gNumKeyDeviceListEntries_c
+  106:      
+  107:      #if gNumKeyUsageListEntries_c > 0
+  108:         KeyUsageDescriptor_t  gPIBKeyUsageDescriptorTable[gNumKeyUsageListEntries_c * gNumKeyTableEntries_c];
+  109:         const uint8_t gNumKeyUsageListEntries = gNumKeyUsageListEntries_c; /* The number of elements for each virtual array inside the gPIBKeyDeviceDescriptorTable */
+  110:      #endif //gNumKeyUsageListEntries_c
+  111:    #endif //gNumKeyTableEntries_c
+  112:    
+  113:    #if gNumDeviceTableEntries_c > 0
+  114:      DeviceDescriptor_t gPIBDeviceTable[gNumDeviceTableEntries_c];
+  115:      const uint8_t gNumDeviceTableEntries = gNumDeviceTableEntries_c;    
+  116:    #endif //gNumDeviceTableEntries_c
+  117:  
+  118:    #if gNumSecurityLevelTableEntries_c > 0
+  119:      SecurityLevelDescriptor_t gPIBSecurityLevelTable[gNumSecurityLevelTableEntries_c];
+  120:      const uint8_t gNumSecurityLevelTableEntries = gNumSecurityLevelTableEntries_c;    
+  121:    #endif //gNumKeyTableEntries_d
+  122:  
+  123:  
+  124:  #endif  //gMAC2006_d
+  125:  
+  126:  #if MsgTracking_d
+  127:  const uint8_t TotalNoOfMsgs_c = (gTotalBigMsgs_d + gTotalSmallMsgs_d);
+  128:  
+  129:  MsgTracking_t MsgTrackingArray[(gTotalBigMsgs_d + gTotalSmallMsgs_d)] = 0;
+  130:  uint8_t NoOfWrongAddrs = 0;
+  131:  #endif
+  132:  
+  133:  #ifdef PROCESSOR_QE128
+  134:   typedef uint32_t AppReturnAddr_t;
+  135:  #else
+  136:   typedef uint16_t AppReturnAddr_t; 
+  137:  #endif 
+  138:  /************************************************************************************
+  139:  *************************************************************************************
+  140:  * Private prototypes
+  141:  *************************************************************************************
+  142:  ************************************************************************************/
+  143:  
+  144:  
+  145:  /************************************************************************************
+  146:  *************************************************************************************
+  147:  * Public functions
+  148:  *************************************************************************************
+  149:  ************************************************************************************/
+  150:  /************************************************************************************
+  151:  * Initialize Msg tracking array. It is called by the Msg system when the MAC is reset
+  152:  *
+  153:  * Interface assumptions:
+  154:  *   None
+  155:  *   
+  156:  * Return value:
+  157:  *   None.
+  158:  * 
+  159:  ************************************************************************************/
+  160:  
+  161:  void MM_InitMsgTracking(void) {
+  162:  #if MsgTracking_d
+  163:     FLib_MemSet((uint8_t* )&MsgTrackingArray[0],0,(sizeof(MsgTracking_t)/sizeof(uint8_t)) * TotalNoOfMsgs_c);
+  164:     NoOfWrongAddrs = 0;
+  165:  #endif   
+  166:  }
+  0000 8d       [7]             RTC   
+  167:  /************************************************************************************
+  168:  * Initialize Msg tracking array a current index with a Msg address.
+  169:  * This functions is called for once for every Msg when the MAC is reset.
+  170:  *
+  171:  * Interface assumptions:
+  172:  *   None
+  173:  *   
+  174:  * Return value:
+  175:  *   None.
+  176:  * 
+  177:  ************************************************************************************/
+  178:  void   MM_AddMsgToTrackingArray(uint8_t Index, uint16_t Addr) {
+  179:  #if MsgTracking_d
+  180:        MsgTrackingArray[Index].MsgAddr = Addr;  
+  181:  #else
+  182:    /*To prevent compiler warinngs:*/
+  183:    (void) Index;
+  184:    (void) Addr;  
+  185:  #endif      
+  186:  }
+  0000 8d       [7]             RTC   
+  187:  /************************************************************************************
+  188:  * This function finds the index of a Msg in the Tracking array
+  189:  * -1 is returned if Msg not found and the NoOfWrongAddrs is incremented.
+  190:  *
+  191:  * Interface assumptions:
+  192:  *   None
+  193:  *   
+  194:  * Return value:
+  195:  *   Index of message in tracking array
+  196:  * 
+  197:  ************************************************************************************/  
+  198:  int8_t MM_GetMsgIndex(const uint16_t MsgAddr)
+  199:  {
+  200:  #if MsgTracking_d
+  201:    uint8_t i;    
+  202:    /*Search through the Tracking array*/ 
+  203:    for (i = 0; i < TotalNoOfMsgs_c; i++) 
+  204:    {      
+  205:      /*If Msg Addr found then exit with Index*/
+  206:      if (MsgAddr == MsgTrackingArray[i].MsgAddr)
+  207:        return i;
+  208:    }
+  209:    /*Msg addr not found, increment error counter and return*/  
+  210:    NoOfWrongAddrs++;
+  211:    return -1;
+  212:  #else  
+  213:    /*To prevent compiler warinngs:*/
+  214:   (void) MsgAddr;
+  215:   return -1;
+  0000 a6ff     [2]             LDA   #-1
+  216:  #endif 
+  217:  }
+  0002 8d       [7]             RTC   
+  218:  
+  219:  /************************************************************************************
+  220:  * This function is called when ever a Msg is freed or allocated and updates
+  221:  * the tracking information for that particular Msg
+  222:  * 
+  223:  *
+  224:  * Interface assumptions:
+  225:  *   None
+  226:  *   
+  227:  * Return value:
+  228:  *   Success status
+  229:  * 
+  230:  ************************************************************************************/  
+  231:  bool_t MM_UpdateMsgTracking(const void *pBlock, const bool_t Alloc, const uint8_t offset)
+  232:  {
+  233:  #if MsgTracking_d
+  234:    uint16_t StackPointer = 0;
+  235:    int8_t index = MM_GetMsgIndex((uint16_t)pBlock);
+  236:      
+  237:    if (index >= 0)
+  238:    {          
+  239:      MsgTrackingArray[index].AllocStatus = Alloc;
+  240:      
+  241:      /*Get stack pointer so we can find return addr of orginal free/alloc caller*/
+  242:      _asm
+  243:      {
+  244:        tsx        
+  245:        sthx StackPointer
+  246:      }
+  247:      /*Update MsgTracking array counters and return address of alloc or free */  
+  248:      if (Alloc) {
+  249:        MsgTrackingArray[index].AllocCounter++;
+  250:        MsgTrackingArray[index].AllocAddr = (AppReturnAddr_t) (*((volatile uint16_t*) (StackPointer - 1 + offset)));
+  251:        
+  252:        #ifdef PROCESSOR_QE128      
+  253:           /* Copy the PPAGE if the calling function has a paged address */
+  254:           *((uint8_t*)&(MsgTrackingArray[index].AllocAddr) + 1) = *(uint8_t*)(StackPointer - 2 + offset);
+  255:        #endif 
+  256:      }
+  257:      else {
+  258:        MsgTrackingArray[index].FreeCounter++;        
+  259:        MsgTrackingArray[index].FreeAddr = (AppReturnAddr_t) (*((volatile uint16_t*) (StackPointer - 1 + offset)));      
+  260:       
+  261:        #ifdef PROCESSOR_QE128      
+  262:           /* Copy the PPAGE if the calling function has a paged address */
+  263:           *((uint8_t*)&(MsgTrackingArray[index].FreeAddr) + 1) = *(uint8_t*)(StackPointer - 2 + offset);
+  264:        #endif 
+  265:      }
+  266:      return TRUE;
+  267:        
+  268:    }      
+  269:    else  
+  270:      return FALSE;
+  271:  #else
+  272:    /*To prevent compiler warinngs:*/
+  273:    (void) pBlock;
+  274:    (void) Alloc;
+  275:    (void) offset;
+  276:    return FALSE;
+  0000 4f       [1]             CLRA  
+  277:  #endif 
+  278:  }
+  0001 8d       [7]             RTC   
+  279:  
+  280:  

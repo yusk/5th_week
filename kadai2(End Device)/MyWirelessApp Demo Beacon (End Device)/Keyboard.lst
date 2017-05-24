@@ -1,0 +1,990 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * Source file for keyboard driver.
+    3:  *
+    4:  * This keyboard driver has the concept of short keys and long keys. A long key is
+    5:  * press and hold on a key. 
+    6:  *
+    7:  * The keyboard handling logic can only understand one key at a time (pressing
+    8:  * two keys at once will indicate only the first key).
+    9:  *
+   10:  * Copyright (c) 2006, Freescale, Inc. All rights reserved.
+   11:  *
+   12:  *
+   13:  * No part of this document must be reproduced in any form - including copied,
+   14:  * transcribed, printed or by any electronic means - without specific written
+   15:  * permission from Freescale Semiconductor.
+   16:  *
+   17:  ******************************************************************************/
+   18:  #include "EmbeddedTypes.h"
+   19:  #include "TMR_Interface.h"
+   20:  #include "Keyboard.h"
+   21:  #include "Led.h"
+   22:  #include "switch.h"
+   23:  #include "PWRLib.h"
+   24:  
+   25:  
+   26:  #if (gKeyBoardSupported_d == 1)
+   27:  
+   28:  /******************************************************************************
+   29:  *******************************************************************************
+   30:  * Private macros
+   31:  *******************************************************************************
+   32:  ******************************************************************************/
+   33:  
+   34:  /* Keyboard Interrupt Status and Control register
+   35:   bit7-4:  Edge select for kb pins 7-4 (PTA 7-4)
+   36:   bit3:    KBIF Keyboard interrupt flag - read only
+   37:   bit2:    KBACK Keyboard interrupt acknowledge - write 1 to clear KBIF
+   38:   bit1:    KBIE Keyboard interrupt enable
+   39:   bit0:    Keyboard detection mode - 0= edge only , 1= edge and level */
+   40:  #define mKBIE_BIT_c (1<<1)
+   41:  #define mKBACK_BIT_c (1<<2)
+   42:  #define mKBIF_BIT_c (1<<3)
+   43:  
+   44:  #if defined(PROCESSOR_QE128)
+   45:  // PROCESSOR_QE128
+   46:  #define mKBI_ENABLE_c KBI2SC |= mKBIE_BIT_c
+   47:  #define mKBI_DISABLE_c KBI2SC &= ~mKBIE_BIT_c
+   48:  #define mKBI_ACKNOWLEDGE_c KBI2SC |= mKBACK_BIT_c
+   49:  #define mSWITCH_MASK_c (gSWITCH1_MASK_c | gSWITCH2_MASK_c | gSWITCH3_MASK_c | gSWITCH4_MASK_c)
+   50:  #elif defined(PROCESSOR_MC1323X)
+   51:  // PROCESSOR_MC1323X
+   52:    #define mKBI_ENABLE_c       KBIxSC |= mKBIE_BIT_c
+   53:    #define mKBI_DISABLE_c      KBIxSC &= ~mKBIE_BIT_c
+   54:    #define mKBI_ACKNOWLEDGE_c  KBIxSC |= mKBACK_BIT_c
+   55:    #else
+   56:    // PROCESSOR_HCS08
+   57:      #define mKBI_ENABLE_c KBISC |= mKBIE_BIT_c
+   58:      #define mKBI_DISABLE_c KBISC &= ~mKBIE_BIT_c
+   59:      #define mKBI_ACKNOWLEDGE_c KBISC |= mKBACK_BIT_c
+   60:      #define mSWITCH_MASK_c (gSWITCH1_MASK_c | gSWITCH2_MASK_c | gSWITCH3_MASK_c | gSWITCH4_MASK_c)
+   61:  #endif
+   62:  
+   63:  /* Keyboard State */
+   64:  #if (gKeyEventNotificationMode_c == gKbdEventShortLongPressMode_c)
+   65:  enum {
+   66:    mStateKeyIdle,        /* coming in for first time */
+   67:    mStateKeyDetected,    /* got a key, waiting to see if it's a long key */
+   68:    mStateKeyWaitRelease  /* got the long key, waiting for the release to go back to idle */
+   69:  };
+   70:  #elif (gKeyEventNotificationMode_c == gKbdEventPressHoldReleaseMode_c)
+   71:  enum {
+   72:    mStateKeyDebounce,
+   73:    mStateKeyHoldDetection,
+   74:    mStateKeyHoldGen,
+   75:  };
+   76:  #endif //gKeyEventNotificationMode_c
+   77:  
+   78:  #define mNoKey_c 0xff
+   79:  
+   80:  /******************************************************************************
+   81:  *******************************************************************************
+   82:  * Private type definitions
+   83:  *******************************************************************************
+   84:  ******************************************************************************/
+   85:  #if (gMC1323xMatrixKBD_d == 1)
+   86:  typedef uint16_t   switchScan_t;
+   87:  typedef struct  kbdRowPort_tag 
+   88:  {
+   89:   volatile uint8_t *portData;
+   90:   volatile uint8_t *portDir;
+   91:   uint8_t pin;
+   92:  }kbdRowPort_t;
+   93:  #else
+   94:  typedef uint8_t    switchScan_t;
+   95:  #endif /*  gMC1323xMatrixKBD_d */
+   96:  
+   97:  /******************************************************************************
+   98:  *******************************************************************************
+   99:  * Private prototypes
+  100:  *******************************************************************************
+  101:  ******************************************************************************/
+  102:  static void         KBD_KeyScan(uint8_t timerId);
+  103:  static switchScan_t KBD_KeySwitchPortGet(void);
+  104:  static uint8_t      KBD_PortGet(void);
+  105:  static void         KBD_FinishScan(uint8_t timerId);
+  106:  #if (gMC1323xMatrixKBD_d == 1)
+  107:  static switchScan_t KBD_KeyMatrixGet(void);
+  108:  static void         KBD_MatrixSetRows(bool_t activate);
+  109:  static void         KBD_MatrixActivateRow(uint8_t row);
+  110:  static void         KBD_MatrixDeactivateRow(uint8_t row);
+  111:  #endif /*  gMC1323xMatrixKBD_d */
+  112:  /******************************************************************************
+  113:  *******************************************************************************
+  114:  * Private memory declarations
+  115:  *******************************************************************************
+  116:  ******************************************************************************/
+  117:  #if (gKeyEventNotificationMode_c == gKbdEventShortLongPressMode_c)
+  118:  static uint8_t       mKeyState = mStateKeyIdle;
+  119:  static uint8_t       mLongKeyCount;
+  120:  #elif (gKeyEventNotificationMode_c == gKbdEventPressHoldReleaseMode_c)
+  121:  static uint8_t       mKeyState = mStateKeyDebounce;
+  122:  static uint8_t       mHoldDectionKeyCount;
+  123:  static uint8_t       mHoldGenKeyCount;
+  124:  #endif //gKeyEventNotificationMode_c
+  125:  static switchScan_t  mSwitch_SCAN;
+  126:  static KBDFunction_t mpfKeyFunction;
+  127:  
+  128:  #if (gMC1323xMatrixKBD_d == 1)
+  129:  static kbdRowPort_t mKeyRowPorts[] = 
+  130:  {
+  131:    #if (KBI_MATRIX_ROW1_PIN != KBI_PIN_NOT_IMPLEMENTED) 
+  132:     {&KBI_MATRIX_ROW1_PORT, &KBI_MATRIX_ROW1_PORT_DIR, KBI_MATRIX_ROW1_PIN},
+  133:    #endif
+  134:    
+  135:    #if (KBI_MATRIX_ROW2_PIN != KBI_PIN_NOT_IMPLEMENTED) 
+  136:     {&KBI_MATRIX_ROW2_PORT, &KBI_MATRIX_ROW2_PORT_DIR, KBI_MATRIX_ROW2_PIN},
+  137:    #endif
+  138:    
+  139:    #if (KBI_MATRIX_ROW3_PIN != KBI_PIN_NOT_IMPLEMENTED) 
+  140:     {&KBI_MATRIX_ROW3_PORT, &KBI_MATRIX_ROW3_PORT_DIR, KBI_MATRIX_ROW3_PIN},
+  141:    #endif
+  142:  
+  143:    #if (KBI_MATRIX_ROW4_PIN != KBI_PIN_NOT_IMPLEMENTED) 
+  144:     {&KBI_MATRIX_ROW4_PORT, &KBI_MATRIX_ROW4_PORT_DIR, KBI_MATRIX_ROW4_PIN},
+  145:    #endif
+  146:  
+  147:    #if (KBI_MATRIX_ROW5_PIN != KBI_PIN_NOT_IMPLEMENTED) 
+  148:     {&KBI_MATRIX_ROW5_PORT, &KBI_MATRIX_ROW5_PORT_DIR, KBI_MATRIX_ROW5_PIN},
+  149:    #endif
+  150:  
+  151:    #if (KBI_MATRIX_ROW6_PIN != KBI_PIN_NOT_IMPLEMENTED) 
+  152:     {&KBI_MATRIX_ROW6_PORT, &KBI_MATRIX_ROW6_PORT_DIR, KBI_MATRIX_ROW6_PIN},
+  153:    #endif
+  154:    
+  155:    #if (KBI_MATRIX_ROW7_PIN != KBI_PIN_NOT_IMPLEMENTED) 
+  156:     {&KBI_MATRIX_ROW7_PORT, &KBI_MATRIX_ROW7_PORT_DIR, KBI_MATRIX_ROW7_PIN},
+  157:    #endif
+  158:  
+  159:    #if (KBI_MATRIX_ROW8_PIN != KBI_PIN_NOT_IMPLEMENTED) 
+  160:     {&KBI_MATRIX_ROW8_PORT, &KBI_MATRIX_ROW8_PORT_DIR, KBI_MATRIX_ROW8_PIN},
+  161:    #endif    
+  162:  };
+  163:  #endif
+  164:  
+  165:  uint8_t pressedKey;
+  166:  tmrTimerID_t mKeyScanTimerID = gTmrInvalidTimerID_c;
+  167:  /******************************************************************************
+  168:  *******************************************************************************
+  169:  * Public functions
+  170:  *******************************************************************************/
+  171:  
+  172:  /******************************************************************************
+  173:  * Keyboard ISR. Starts a timer for itself.
+  174:  ******************************************************************************/
+  175:  /* Place it in NON_BANKED memory */
+  176:  #ifdef MEMORY_MODEL_BANKED
+  177:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+  178:  #else
+  179:  #pragma CODE_SEG DEFAULT
+  180:  #endif /* MEMORY_MODEL_BANKED */
+  181:  INTERRUPT_KEYWORD void Switch_Press_ISR
+  182:    (
+  183:    )
+  184:  {
+  0000 8b       [2]             PSHH  
+  185:    mKBI_DISABLE_c;
+  0001 1332     [5]             BCLR  1,50
+  186:    mKBI_ACKNOWLEDGE_c;
+  0003 1432     [5]             BSET  2,50
+  187:    TMR_StartIntervalTimer(mKeyScanTimerID, gKeyScanInterval_c, KBD_KeyScan);
+  0005 c60000   [4]             LDA   mKeyScanTimerID
+  0008 87       [2]             PSHA  
+  0009 ae32     [2]             LDX   #50
+  000b 8c       [1]             CLRH  
+  000c 89       [2]             PSHX  
+  000d 8b       [2]             PSHH  
+  000e 8b       [2]             PSHH  
+  000f 8b       [2]             PSHH  
+  0010 450000   [3]             LDHX  @KBD_KeyScan
+  0013 89       [2]             PSHX  
+  0014 8b       [2]             PSHH  
+  0015 a600     [2]             LDA   @KBD_KeyScan:PAGE
+  0017 87       [2]             PSHA  
+  0018 ac000000 [8]             CALL  TMR_StartIntervalTimer
+  001c a708     [2]             AIS   #8
+  188:    PWRLib_MCU_WakeupReason.Bits.FromKBI = TRUE;
+  001e 1400     [5]             BSET  2,PWRLib_MCU_WakeupReason
+  189:    #if (gMC1323xMatrixKBD_d == 1) 
+  190:     /* Switch all ROW ports to input to avoid current consumption */
+  191:     KBD_MatrixSetRows(FALSE);
+  0020 4f       [1]             CLRA  
+  0021 ac000000 [8]             CALL  KBD_MatrixSetRows
+  192:    #endif 
+  193:  }
+  0025 8a       [3]             PULH  
+  0026 80       [9]             RTI   
+  194:  #pragma CODE_SEG DEFAULT
+  195:  /******************************************************************************
+  196:  * Initialize the keyboard handling. Works on on Freescale demo boards.
+  197:  *******************************************************************************/
+  198:  
+  199:  
+  200:  void KBD_Init
+  201:    (
+  202:    KBDFunction_t pfCallBackAdr /* IN: Pointer to callback function */
+  203:    )
+  204:  {
+  205:    /* timer is used to determine short or long key press */
+  206:    mKeyScanTimerID = TMR_AllocateTimer();
+  0000 ac000000 [8]             CALL  TMR_AllocateTimer
+  0004 c70000   [4]             STA   mKeyScanTimerID
+  207:    
+  208:    /* where to send the data */
+  209:    mpfKeyFunction = pfCallBackAdr;
+  0007 9efe05   [5]             LDHX  5,SP
+  000a 960001   [5]             STHX  mpfKeyFunction:1
+  000d 95       [2]             TSX   
+  000e e603     [3]             LDA   3,X
+  0010 c70000   [4]             STA   mpfKeyFunction
+  210:    
+  211:    #if (gTargetAxiomGB60_d == 1)
+  212:      KBISC |= 0x02;
+  213:      KBIPE |= 0xF0;
+  214:    #else
+  215:      #if defined(PROCESSOR_QE128)
+  216:        /* write kbd status and control register
+  217:        - bits 7-4 set to 0: set falling edge detect for kbd pins (7-4)
+  218:        - bit  1   set to 1: kbd interrupt enable
+  219:        - bit  0   set to 0: kbd detection mode set to edge-only */
+  220:        KBI2SC |= 0x02; 
+  221:        /* write kbd pin enable register. Set to 1 all bits corresponding
+  222:        to the pins to be used as KBD pins and not as GPIOs */
+  223:        KBI2PE |= mSWITCH_MASK; 
+  224:        /* set kbd interrupt edge select*/
+  225:        KBI2ES &= ~mSWITCH_MASK; 
+  226:      #elif defined(PROCESSOR_MC1323X)
+  227:        #if (gMC1323xMatrixKBD_d == 1)
+  228:        /* Activate rows -> ROW Pins = 0. 
+  229:         * When a switch is pressed, the corresponding column will generate an interrupt (1 -> 0)
+  230:         */
+  231:         KBD_MatrixSetRows(TRUE);
+  0013 a601     [2]             LDA   #1
+  0015 ac000000 [8]             CALL  KBD_MatrixSetRows
+  232:        #endif 
+  233:        KBIxSC  = 0x02; /* KBI status and control register initialized*/
+  0019 6e0232   [4]             MOV   #2,50
+  234:        KBIxPE  =  gMC1323xKBIPinEnableMask_d; /* KBI pin enable controls initialized*/
+  001c 6e0f33   [4]             MOV   #15,51
+  235:        KBIxES  = ~gMC1323xKBIPinEnableMask_d; /* KBI interrupt edge select*/   
+  001f 6ef034   [4]             MOV   #-16,52
+  236:      #else 
+  237:        /* write kbd status and control register
+  238:        - bits 7-4 set to 0: set falling edge detect for kbd pins (7-4)
+  239:        - bit  1   set to 1: kbd interrupt enable
+  240:        - bit  0   set to 0: kbd detection mode set to edge-only */
+  241:        KBISC |= 0x02;
+  242:        /* write kbd pin enable register. Set to 1 all bits corresponding
+  243:        to the pins to be used as KBD pins and not as GPIOs */
+  244:        KBIPE |= mSWITCH_MASK;
+  245:      #endif
+  246:    #endif
+  247:  
+  248:  }
+  0022 8d       [7]             RTC   
+  249:  
+  250:  /******************************************************************************
+  251:  *******************************************************************************
+  252:  * Private functions
+  253:  *******************************************************************************
+  254:  ******************************************************************************/
+  255:  
+  256:  /******************************************************************************
+  257:  * Called to get state of keyboard
+  258:  ******************************************************************************/
+  259:  static switchScan_t KBD_KeySwitchPortGet
+  260:    (
+  261:    void
+  262:    )
+  263:  {
+  264:   #if (gMC1323xMatrixKBD_d == 1)
+  265:    #if ((KBI_MATRIX_ROW_MASK == 0) || (KBI_MATRIX_COL_MASK == 0))
+  266:     #error "Wrong configuration for ROW or COL masks when using Matrix scan"
+  267:    #endif 
+  268:    return KBD_KeyMatrixGet(); /* Returns the first pressed row and column */
+  0000 ac000000 [8]             CALL  KBD_KeyMatrixGet
+  269:   #else
+  270:     uint8_t portScan = SwitchPortGet;
+  271:     pressedKey = mNoKey_c;
+  272:     
+  273:     if(portScan & gSWITCH1_MASK_c)
+  274:        pressedKey = 0;
+  275:     else if(portScan & gSWITCH2_MASK_c)
+  276:        pressedKey = 1;
+  277:     else if(portScan & gSWITCH3_MASK_c)
+  278:        pressedKey = 2;
+  279:     else if(portScan & gSWITCH4_MASK_c)
+  280:        pressedKey = 3;
+  281:    return portScan;
+  282:   #endif   
+  283:  }
+  0004 8d       [7]             RTC   
+  284:  
+  285:  
+  286:  /******************************************************************************
+  287:  * Called to get state of the port
+  288:  ******************************************************************************/
+  289:  static uint8_t KBD_PortGet
+  290:    (
+  291:    void
+  292:    )
+  293:  {
+  294:   #if (gMC1323xMatrixKBD_d == 1)
+  295:    uint8_t      colVal;
+  296:    
+  297:    /* Check if at least one row is activated */
+  298:    
+  299:    /* Activate all rows (logical 0) */
+  300:    KBD_MatrixSetRows(TRUE);
+  0000 a601     [2]             LDA   #1
+  0002 ac000000 [8]             CALL  KBD_MatrixSetRows
+  301:    
+  302:    colVal = KBI_MATRIX_COL_GET;
+  0006 b602     [3]             LDA   2
+  0008 a40f     [2]             AND   #15
+  000a a80f     [2]             EOR   #15
+  303:    
+  304:    /* Deactivate all rows to avoid current consumption */
+  305:    KBD_MatrixSetRows(FALSE);
+  000c 87       [2]             PSHA  
+  000d 4f       [1]             CLRA  
+  000e ac000000 [8]             CALL  KBD_MatrixSetRows
+  306:    
+  307:    return colVal;
+  0012 86       [3]             PULA  
+  308:   #else
+  309:    return SwitchPortGet;
+  310:   #endif    
+  311:  }
+  0013 8d       [7]             RTC   
+  312:  
+  313:  /******************************************************************************
+  314:  * Called to check if a key is still pressed
+  315:  ******************************************************************************/
+  316:  bool_t KBD_KeyCheck(switchScan_t previousPressed)
+  317:  {
+  0000 a7fd     [2]             AIS   #-3
+  318:    bool_t pressed = FALSE;
+  319:    
+  320:   #if (gMC1323xMatrixKBD_d == 1)
+  321:    /* Check if the matrix key is still pressed */
+  322:    uint8_t r = (uint8_t)(previousPressed >> 8);
+  0002 8b       [2]             PSHH  
+  0003 9e6f02   [6]             CLR   2,SP
+  0006 86       [3]             PULA  
+  0007 9ee702   [4]             STA   2,SP
+  323:    uint8_t c_mask = (uint8_t)previousPressed;
+  000a 9eef03   [4]             STX   3,SP
+  324:  
+  325:    
+  326:    /* Activate this row */
+  327:    KBD_MatrixActivateRow(r);
+  000d ac000000 [8]             CALL  KBD_MatrixActivateRow
+  328:    
+  329:    if(KBI_MATRIX_COL_GET & c_mask)
+  0011 b602     [3]             LDA   2
+  0013 a40f     [2]             AND   #15
+  0015 a80f     [2]             EOR   #15
+  0017 95       [2]             TSX   
+  0018 e402     [3]             AND   2,X
+  001a 2703     [3]             BEQ   L1F ;abs = 001f
+  330:    {
+  331:     /* The key is still pressed */
+  332:     pressed = TRUE;
+  001c a601     [2]             LDA   #1
+  001e f7       [2]             STA   ,X
+  001f          L1F:    
+  333:    }
+  334:    
+  335:    /* Deactivate the row */
+  336:    KBD_MatrixActivateRow(r);
+  001f e601     [3]             LDA   1,X
+  0021 ac000000 [8]             CALL  KBD_MatrixActivateRow
+  337:   #else
+  338:     uint8_t portScan = SwitchPortGet;
+  339:     uint8_t key = mNoKey_c;
+  340:     
+  341:     (void)previousPressed; /* avoid compiler warnings */
+  342:    
+  343:     if(portScan & gSWITCH1_MASK_c)
+  344:        key = 0;
+  345:     else if(portScan & gSWITCH2_MASK_c)
+  346:        key = 1;
+  347:     else if(portScan & gSWITCH3_MASK_c)
+  348:        key = 2;
+  349:     else if(portScan & gSWITCH4_MASK_c)
+  350:        key = 3;
+  351:    /* Check if the switch is still pressed */
+  352:    if(pressedKey == key)
+  353:    {
+  354:     pressed = TRUE;
+  355:    }
+  356:   #endif 
+  357:    return pressed;
+  0025 95       [2]             TSX   
+  0026 f6       [3]             LDA   ,X
+  358:  }
+  0027 a703     [2]             AIS   #3
+  0029 8d       [7]             RTC   
+  359:  
+  360:  /******************************************************************************
+  361:  * Called to activate / deactivate all rows
+  362:  ******************************************************************************/
+  363:  #if (gMC1323xMatrixKBD_d == 1)
+  364:  static void KBD_MatrixSetRows(bool_t activate) 
+  365:  {
+  0000 87       [2]             PSHA  
+  366:    uint8_t i;
+  367:    
+  368:    for (i = 0; i < (sizeof(mKeyRowPorts) / sizeof(mKeyRowPorts[0])); i++) 
+  0001 4f       [1]             CLRA  
+  0002          L2:     
+  369:    {                                   
+  370:      if(activate) 
+  0002 95       [2]             TSX   
+  0003 7d       [3]             TST   ,X
+  0004 2707     [3]             BEQ   LD ;abs = 000d
+  371:      {
+  372:        KBD_MatrixActivateRow(i);
+  0006 87       [2]             PSHA  
+  0007 ac000000 [8]             CALL  KBD_MatrixActivateRow
+  373:      }
+  000b 2005     [3]             BRA   L12 ;abs = 0012
+  000d          LD:     
+  374:      else 
+  375:      {
+  376:        KBD_MatrixDeactivateRow(i);
+  000d 87       [2]             PSHA  
+  000e ac000000 [8]             CALL  KBD_MatrixDeactivateRow
+  0012          L12:    
+  0012 86       [3]             PULA  
+  0013 4c       [1]             INCA  
+  0014 a102     [2]             CMP   #2
+  0016 25ea     [3]             BCS   L2 ;abs = 0002
+  377:      }
+  378:    }
+  379:  }
+  0018 8a       [3]             PULH  
+  0019 8d       [7]             RTC   
+  380:  #endif /* gMC1323xMatrixKBD_d */
+  381:  
+  382:  
+  383:  /******************************************************************************
+  384:  * Called to activate one row
+  385:  ******************************************************************************/
+  386:  #if (gMC1323xMatrixKBD_d == 1)
+  387:  static void KBD_MatrixActivateRow(uint8_t row)
+  388:  {
+  389:     /* Direction to output */
+  390:      *(mKeyRowPorts[row].portDir)  |=  mKeyRowPorts[row].pin;
+  0000 ae05     [2]             LDX   #5
+  0002 42       [5]             MUL   
+  0003 8c       [1]             CLRH  
+  0004 97       [1]             TAX   
+  0005 9ebe0002 [6]             LDHX  @mKeyRowPorts:2,X
+  0009 87       [2]             PSHA  
+  000a f6       [3]             LDA   ,X
+  000b 8b       [2]             PSHH  
+  000c 8c       [1]             CLRH  
+  000d 89       [2]             PSHX  
+  000e 9eee03   [4]             LDX   3,SP
+  0011 da0004   [4]             ORA   @mKeyRowPorts:4,X
+  0014 9efe02   [5]             LDHX  2,SP
+  0017 88       [3]             PULX  
+  0018 f7       [2]             STA   ,X
+  391:     /* Data = 0 */
+  392:      *(mKeyRowPorts[row].portData) &= ~mKeyRowPorts[row].pin;
+  0019 8c       [1]             CLRH  
+  001a 9eee02   [4]             LDX   2,SP
+  001d 9ebe0000 [6]             LDHX  @mKeyRowPorts,X
+  0021 87       [2]             PSHA  
+  0022 8b       [2]             PSHH  
+  0023 86       [3]             PULA  
+  0024 9ee702   [4]             STA   2,SP
+  0027 86       [3]             PULA  
+  0028 8c       [1]             CLRH  
+  0029 89       [2]             PSHX  
+  002a 9eee03   [4]             LDX   3,SP
+  002d d60004   [4]             LDA   @mKeyRowPorts:4,X
+  0030 43       [1]             COMA  
+  0031 95       [2]             TSX   
+  0032 ee01     [3]             LDX   1,X
+  0034 89       [2]             PSHX  
+  0035 8a       [3]             PULH  
+  0036 88       [3]             PULX  
+  0037 f4       [3]             AND   ,X
+  0038 f7       [2]             STA   ,X
+  0039 a702     [2]             AIS   #2
+  393:  }
+  003b 8d       [7]             RTC   
+  394:  #endif /* gMC1323xMatrixKBD_d */
+  395:  
+  396:  /******************************************************************************
+  397:  * Called to de-activate one row
+  398:  ******************************************************************************/
+  399:  #if (gMC1323xMatrixKBD_d == 1)
+  400:  static void KBD_MatrixDeactivateRow(uint8_t row)
+  401:  {
+  402:       /* Direction to input */
+  403:        *(mKeyRowPorts[row].portDir)  &= ~mKeyRowPorts[row].pin;
+  0000 ae05     [2]             LDX   #5
+  0002 42       [5]             MUL   
+  0003 8c       [1]             CLRH  
+  0004 97       [1]             TAX   
+  0005 9ebe0002 [6]             LDHX  @mKeyRowPorts:2,X
+  0009 8b       [2]             PSHH  
+  000a 8c       [1]             CLRH  
+  000b 89       [2]             PSHX  
+  000c 97       [1]             TAX   
+  000d d60004   [4]             LDA   @mKeyRowPorts:4,X
+  0010 43       [1]             COMA  
+  0011 95       [2]             TSX   
+  0012 ee01     [3]             LDX   1,X
+  0014 89       [2]             PSHX  
+  0015 8a       [3]             PULH  
+  0016 88       [3]             PULX  
+  0017 f4       [3]             AND   ,X
+  0018 f7       [2]             STA   ,X
+  0019 8a       [3]             PULH  
+  404:  }
+  001a 8d       [7]             RTC   
+  405:  #endif /* gMC1323xMatrixKBD_d */
+  406:  
+  407:  
+  408:  
+  409:  /******************************************************************************
+  410:  * Called to get state of the matrix keyboard.
+  411:  ******************************************************************************/
+  412:  #if (gMC1323xMatrixKBD_d == 1)
+  413:  static switchScan_t KBD_KeyMatrixGet(void)
+  414:  {
+  0000 a7f9     [2]             AIS   #-7
+  415:    /* Get the row and column values */
+  416:    uint8_t      colVal;
+  417:    switchScan_t portReading = 0;
+  0002 95       [2]             TSX   
+  0003 6f03     [5]             CLR   3,X
+  0005 6f02     [5]             CLR   2,X
+  418:    uint8_t      r = 0, r_mask = 1, c = 0, c_mask = 1;
+  0007 7f       [4]             CLR   ,X
+  0008 6f01     [5]             CLR   1,X
+  000a a601     [2]             LDA   #1
+  000c e704     [3]             STA   4,X
+  419:    uint8_t      mask;
+  420:    
+  421:    pressedKey = mNoKey_c;
+  000e aeff     [2]             LDX   #-1
+  0010 cf0000   [4]             STX   pressedKey
+  422:    
+  423:    /* Check if at least one column is activated */
+  424:    
+  425:    /* Activate the rows */
+  426:    KBD_MatrixSetRows(TRUE);
+  0013 ac000000 [8]             CALL  KBD_MatrixSetRows
+  427:    
+  428:    colVal = KBI_MATRIX_COL_GET;
+  0017 b602     [3]             LDA   2
+  0019 a40f     [2]             AND   #15
+  001b a80f     [2]             EOR   #15
+  001d 95       [2]             TSX   
+  001e e705     [3]             STA   5,X
+  429:    
+  430:    /* De-activate the rows */
+  431:    KBD_MatrixSetRows(FALSE);
+  0020 4f       [1]             CLRA  
+  0021 ac000000 [8]             CALL  KBD_MatrixSetRows
+  432:    
+  433:    if(colVal)
+  0025 95       [2]             TSX   
+  0026 6d05     [4]             TST   5,X
+  0028 275b     [3]             BEQ   L85 ;abs = 0085
+  434:    {
+  435:      /* Find the first pressed column */
+  436:     mask = KBI_MATRIX_COL_MASK;  /*  KBI_MATRIX_COL_MASK cannot be 0 (forced compiler error) */
+  002a a60f     [2]             LDA   #15
+  002c e706     [3]             STA   6,X
+  437:    
+  438:     while((!(colVal & 0x01)) && (c < gMC1323xKBD_COLS_d) && (mask != 0))
+  002e 200f     [3]             BRA   L3F ;abs = 003f
+  0030          L30:    
+  439:     {
+  440:      /* This pin was not asserted */
+  441:      if(mask&0x01)
+  0030 95       [2]             TSX   
+  0031 e606     [3]             LDA   6,X
+  0033 a501     [2]             BIT   #1
+  0035 2702     [3]             BEQ   L39 ;abs = 0039
+  442:      {
+  443:       /* And it belongs to a column */
+  444:       c++;
+  0037 6c01     [5]             INC   1,X
+  0039          L39:    
+  445:      } 
+  446:      mask = mask >>1;
+  0039 6406     [5]             LSR   6,X
+  447:      colVal = colVal>>1;
+  003b 6405     [5]             LSR   5,X
+  448:      c_mask = c_mask<<1;
+  003d 6804     [5]             LSL   4,X
+  003f          L3F:    
+  003f e605     [3]             LDA   5,X
+  0041 a501     [2]             BIT   #1
+  0043 260a     [3]             BNE   L4F ;abs = 004f
+  0045 e601     [3]             LDA   1,X
+  0047 a104     [2]             CMP   #4
+  0049 2404     [3]             BCC   L4F ;abs = 004f
+  004b 6d06     [4]             TST   6,X
+  004d 26e1     [3]             BNE   L30 ;abs = 0030
+  004f          L4F:    
+  449:     }
+  450:     
+  451:     if(c < gMC1323xKBD_COLS_d)
+  004f e601     [3]             LDA   1,X
+  0051 a104     [2]             CMP   #4
+  0053 241b     [3]             BCC   L70 ;abs = 0070
+  0055          L55:    
+  452:     {
+  453:      /* valid column found to be pressed
+  454:       * Activate the rows in ascending order to find the first pressed column
+  455:       */
+  456:            
+  457:       do
+  458:       {
+  459:        KBD_MatrixActivateRow(r);            
+  0055 95       [2]             TSX   
+  0056 f6       [3]             LDA   ,X
+  0057 ac000000 [8]             CALL  KBD_MatrixActivateRow
+  460:        /* Check again the column to see if the current row activates it */
+  461:       }while( (!(KBI_MATRIX_COL_GET & c_mask)) && (r++ < gMC1323xKBD_ROWS_d) );
+  005b b602     [3]             LDA   2
+  005d a40f     [2]             AND   #15
+  005f a80f     [2]             EOR   #15
+  0061 95       [2]             TSX   
+  0062 e404     [3]             AND   4,X
+  0064 260a     [3]             BNE   L70 ;abs = 0070
+  0066 f6       [3]             LDA   ,X
+  0067 97       [1]             TAX   
+  0068 4c       [1]             INCA  
+  0069 9ee701   [4]             STA   1,SP
+  006c a302     [2]             CPX   #2
+  006e 25e5     [3]             BCS   L55 ;abs = 0055
+  0070          L70:    
+  462:      
+  463:     }
+  464:     
+  465:     if(r < gMC1323xKBD_ROWS_d)
+  0070 95       [2]             TSX   
+  0071 f6       [3]             LDA   ,X
+  0072 a102     [2]             CMP   #2
+  0074 240f     [3]             BCC   L85 ;abs = 0085
+  466:     {
+  467:      /* A column was determined to be pressed */    
+  468:      portReading = ((switchScan_t)r << 8) | c_mask;
+  0076 e604     [3]             LDA   4,X
+  0078 e703     [3]             STA   3,X
+  007a f6       [3]             LDA   ,X
+  007b e702     [3]             STA   2,X
+  469:      pressedKey = (r * gMC1323xKBD_COLS_d) + c + 1;
+  007d 48       [1]             LSLA  
+  007e 48       [1]             LSLA  
+  007f eb01     [3]             ADD   1,X
+  0081 4c       [1]             INCA  
+  0082 c70000   [4]             STA   pressedKey
+  0085          L85:    
+  470:     }
+  471:    }  
+  472:    
+  473:    /* De-activate the rows */
+  474:    KBD_MatrixSetRows(FALSE);
+  0085 4f       [1]             CLRA  
+  0086 ac000000 [8]             CALL  KBD_MatrixSetRows
+  475:    
+  476:    return portReading;
+  008a 9efe03   [5]             LDHX  3,SP
+  477:  }
+  008d a707     [2]             AIS   #7
+  008f 8d       [7]             RTC   
+  478:  #endif /* gMC1323xMatrixKBD_d */
+  479:  /******************************************************************************
+  480:  * Called when a key is pressed. Determines when the key is up (lifted).
+  481:  ******************************************************************************/
+  482:  #if (gKeyEventNotificationMode_c == gKbdEventShortLongPressMode_c)
+  483:  static void KBD_KeyScan
+  484:    (
+  485:    uint8_t timerId
+  486:    )
+  487:  {
+  0000 87       [2]             PSHA  
+  488:    uint8_t keyBase;
+  489:  
+  490:    switch(mKeyState) {
+  0001 c60000   [4]             LDA   mKeyState
+  0004 a102     [2]             CMP   #2
+  0006 2277     [3]             BHI   L7F ;abs = 007f
+  0008 4d       [1]             TSTA  
+  0009 2708     [3]             BEQ   L13 ;abs = 0013
+  000b 410119   [4]             CBEQA #1,L27 ;abs = 0027
+  000e 410258   [4]             CBEQA #2,L69 ;abs = 0069
+  0011          L11:    
+  491:  
+  492:      /* got a fresh key */
+  493:      case mStateKeyIdle:      
+  494:        mSwitch_SCAN = KBD_KeySwitchPortGet();
+  495:        if(mSwitch_SCAN != 0)
+  496:        {        
+  497:         mKeyState = mStateKeyDetected;
+  498:         mLongKeyCount = 0;
+  499:        }
+  500:        else
+  501:        {
+  502:         KBD_FinishScan(timerId); 
+  503:        }
+  504:        break;
+  505:  
+  506:      /* a key was detected. Has it been released or still being pressed? */
+  507:      case mStateKeyDetected:
+  508:         keyBase = 0;  /* assume no key */
+  509:         
+  510:         /* Check to see if the key is still pressed. Ignore other pressed keys */
+  511:         if( KBD_KeyCheck(mSwitch_SCAN) ) 
+  512:         {
+  513:           mLongKeyCount++;
+  514:  
+  515:           if(mLongKeyCount >= gLongKeyIterations_c) {
+  516:             keyBase = gKBD_EventLongSW1_c;
+  517:           }
+  518:  
+  519:         }
+  520:         else {     
+  521:           /* short keypress */
+  522:           keyBase = gKBD_EventSW1_c;
+  523:         }
+  524:        
+  525:         if(keyBase) {       
+  526:  
+  527:          /* if a key was pressed, send it */
+  528:          if(pressedKey != mNoKey_c)
+  529:          {
+  530:            #if (gMC1323xMatrixKBD_d == 1)
+  531:             if(keyBase == gKBD_EventSW1_c)
+  532:             {
+  533:               mpfKeyFunction(gKBD_Event_c, pressedKey);
+  534:             }
+  535:             else
+  536:             {
+  537:               mpfKeyFunction(gKBD_EventLong_c, pressedKey); 
+  538:             }
+  539:            #else
+  540:             mpfKeyFunction(keyBase + pressedKey);
+  541:            #endif /* gMC1323xMatrixKBD_d */
+  542:          }
+  543:  
+  544:          /* whether we sent a key or not, wait to go back to keybaord  */
+  545:          mKeyState = mStateKeyWaitRelease;
+  546:        }
+  547:        break;
+  548:  
+  549:      /* got the long key, waiting for the release to go back to idle */
+  550:      case mStateKeyWaitRelease:      
+  551:        /* wait for the release before going back to idle */  
+  552:        if((mSwitch_SCAN == 0) || (KBD_PortGet() == 0)) 
+  553:        {
+  554:          mKeyState = mStateKeyIdle;
+  555:          
+  556:          KBD_FinishScan(timerId);                
+  557:        }
+  558:        break;
+  559:    }
+  560:  }
+  0011 8a       [3]             PULH  
+  0012 8d       [7]             RTC   
+  0013          L13:    
+  0013 ac000000 [8]             CALL  KBD_KeySwitchPortGet
+  0017 960000   [5]             STHX  mSwitch_SCAN
+  001a 275d     [3]             BEQ   L79 ;abs = 0079
+  001c a601     [2]             LDA   #1
+  001e c70000   [4]             STA   mKeyState
+  0021 4f       [1]             CLRA  
+  0022 c70000   [4]             STA   mLongKeyCount
+  0025 8a       [3]             PULH  
+  0026 8d       [7]             RTC   
+  0027          L27:    
+  0027 320000   [5]             LDHX  mSwitch_SCAN
+  002a ac000000 [8]             CALL  KBD_KeyCheck
+  002e 97       [1]             TAX   
+  002f 4f       [1]             CLRA  
+  0030 5d       [1]             TSTX  
+  0031 270e     [3]             BEQ   L41 ;abs = 0041
+  0033 450000   [3]             LDHX  @mLongKeyCount
+  0036 7c       [4]             INC   ,X
+  0037 ce0000   [4]             LDX   mLongKeyCount
+  003a a314     [2]             CPX   #20
+  003c 2504     [3]             BCS   L42 ;abs = 0042
+  003e a605     [2]             LDA   #5
+  0040 21       [3]             SKIP1 L42 ;abs = 0042
+  0041          L41:    
+  0041 4c       [1]             INCA  
+  0042          L42:    
+  0042 4d       [1]             TSTA  
+  0043 273a     [3]             BEQ   L7F ;abs = 007f
+  0045 ce0000   [4]             LDX   pressedKey
+  0048 51ff17   [4]             CBEQX #-1,L62 ;abs = 0062
+  004b 4b03     [4]             DBNZA L50 ;abs = 0050
+  004d a601     [2]             LDA   #1
+  004f 65       [3]             SKIP2 L52 ;abs = 0052
+  0050          L50:    
+  0050 a602     [2]             LDA   #2
+  0052          L52:    
+  0052 87       [2]             PSHA  
+  0053 320001   [5]             LDHX  mpfKeyFunction:1
+  0056 c60000   [4]             LDA   pressedKey
+  0059 8b       [2]             PSHH  
+  005a 87       [2]             PSHA  
+  005b c60000   [4]             LDA   mpfKeyFunction
+  005e ac000000 [8]             CALL  _CALL_STAR08_FAR
+  0062          L62:    
+  0062 a602     [2]             LDA   #2
+  0064 c70000   [4]             STA   mKeyState
+  0067 8a       [3]             PULH  
+  0068 8d       [7]             RTC   
+  0069          L69:    
+  0069 320000   [5]             LDHX  mSwitch_SCAN
+  006c 2707     [3]             BEQ   L75 ;abs = 0075
+  006e ac000000 [8]             CALL  KBD_PortGet
+  0072 4d       [1]             TSTA  
+  0073 260a     [3]             BNE   L7F ;abs = 007f
+  0075          L75:    
+  0075 4f       [1]             CLRA  
+  0076 c70000   [4]             STA   mKeyState
+  0079          L79:    
+  0079 95       [2]             TSX   
+  007a f6       [3]             LDA   ,X
+  007b ac000000 [8]             CALL  KBD_FinishScan
+  007f          L7F:    
+  007f 8a       [3]             PULH  
+  0080 8d       [7]             RTC   
+  561:  #elif (gKeyEventNotificationMode_c == gKbdEventPressHoldReleaseMode_c)
+  562:  static void KBD_KeyScan
+  563:    (
+  564:    uint8_t timerId
+  565:    )
+  566:  {
+  567:    switch(mKeyState) {    
+  568:      case mStateKeyDebounce:
+  569:        mSwitch_SCAN = KBD_KeySwitchPortGet();
+  570:        if(mSwitch_SCAN != 0) {
+  571:          mKeyState =  mStateKeyHoldDetection;
+  572:          mHoldDectionKeyCount = 0; 
+  573:          //Generate press event indication     
+  574:          if(pressedKey != mNoKey_c) {
+  575:            #if (gMC1323xMatrixKBD_d == 1)
+  576:              mpfKeyFunction(gKBD_EventPress_c, pressedKey);
+  577:            #else
+  578:              mpfKeyFunction(gKBD_EventPressSW1_c + pressedKey);
+  579:            #endif /* gMC1323xMatrixKBD_d */           
+  580:          }
+  581:        } 
+  582:        else {
+  583:          KBD_FinishScan(timerId);
+  584:        }      
+  585:      break;
+  586:      case mStateKeyHoldDetection:
+  587:        if( KBD_KeyCheck(mSwitch_SCAN) ) {
+  588:          mHoldDectionKeyCount++;        
+  589:          if (mHoldDectionKeyCount >= gFirstHoldDetectIterations_c) {
+  590:            //first hold event detected - generate hold event
+  591:            if(pressedKey != mNoKey_c) {
+  592:              #if (gMC1323xMatrixKBD_d == 1)
+  593:                mpfKeyFunction(gKBD_EventHold_c, pressedKey);
+  594:              #else
+  595:                mpfKeyFunction(gKBD_EventHoldSW1_c + pressedKey);
+  596:              #endif /* gMC1323xMatrixKBD_d */                       
+  597:            }                    
+  598:            mHoldGenKeyCount = 0;
+  599:            mKeyState = mStateKeyHoldGen;
+  600:          }
+  601:        } 
+  602:        else {        
+  603:          if((mSwitch_SCAN == 0) || (KBD_PortGet() == 0)) {
+  604:            if(pressedKey != mNoKey_c) {
+  605:              #if (gMC1323xMatrixKBD_d == 1)
+  606:                mpfKeyFunction(gKBD_EventRelease_c, pressedKey);
+  607:              #else
+  608:                mpfKeyFunction(gKBD_EventReleaseSW1_c + pressedKey);
+  609:              #endif /* gMC1323xMatrixKBD_d */                       
+  610:              mKeyState = mStateKeyDebounce;
+  611:              KBD_FinishScan(timerId);            
+  612:            }                                       
+  613:          }                
+  614:        }
+  615:      break;
+  616:      case mStateKeyHoldGen:
+  617:        if( KBD_KeyCheck(mSwitch_SCAN) ) {
+  618:          mHoldGenKeyCount++;
+  619:          if(mHoldGenKeyCount >= gHoldDetectIterations_c) {
+  620:            mHoldGenKeyCount = 0;
+  621:            if(pressedKey != mNoKey_c) {
+  622:              #if (gMC1323xMatrixKBD_d == 1)
+  623:                mpfKeyFunction(gKBD_EventHold_c, pressedKey);
+  624:              #else
+  625:                mpfKeyFunction(gKBD_EventHoldSW1_c + pressedKey);
+  626:              #endif /* gMC1323xMatrixKBD_d */                       
+  627:            }           
+  628:          }
+  629:        } 
+  630:        else {
+  631:          if((mSwitch_SCAN == 0) || (KBD_PortGet() == 0)) {
+  632:            if(pressedKey != mNoKey_c) {
+  633:              #if (gMC1323xMatrixKBD_d == 1)
+  634:                mpfKeyFunction(gKBD_EventRelease_c, pressedKey);
+  635:              #else
+  636:                mpfKeyFunction(gKBD_EventReleaseSW1_c + pressedKey);
+  637:              #endif /* gMC1323xMatrixKBD_d */                       
+  638:              mKeyState = mStateKeyDebounce;
+  639:              KBD_FinishScan(timerId);            
+  640:            }                                       
+  641:          }                     
+  642:        }
+  643:      break;
+  644:      default:
+  645:      break;
+  646:    }
+  647:  }
+  648:  #endif//gKeyEventNotificationMode_c
+  649:  
+  650:  /******************************************************************************
+  651:  * Called when a scan is finished. Reactivates the KBI interrupt.
+  652:  ******************************************************************************/
+  653:  static void KBD_FinishScan(uint8_t timerId)
+  654:  {
+  655:    TMR_StopTimer(timerId);
+  0000 ac000000 [8]             CALL  TMR_StopTimer
+  656:          
+  657:    #if (gMC1323xMatrixKBD_d == 1)
+  658:     /* Reactivate the rows */
+  659:     KBD_MatrixSetRows(TRUE);
+  0004 a601     [2]             LDA   #1
+  0006 ac000000 [8]             CALL  KBD_MatrixSetRows
+  660:    #endif
+  661:  
+  662:    /* enable keyboard interrupts */
+  663:     mKBI_ACKNOWLEDGE_c;
+  000a 1432     [5]             BSET  2,50
+  664:     mKBI_ENABLE_c;
+  000c 1232     [5]             BSET  1,50
+  665:  }
+  000e 8d       [7]             RTC   
+  666:  
+  667:  /******************************************************************************
+  668:  *******************************************************************************
+  669:  * Private Debug stuff
+  670:  *******************************************************************************
+  671:  ******************************************************************************/
+  672:  
+  673:  
+  674:  #endif /* gKeyBoardSupported_d */
+  675:  
+  676:  

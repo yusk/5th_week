@@ -77,6 +77,8 @@ enum {
 #define gAppEvtMessageFromMLME_c       (1 << 2)
 #define gAppEvtMessageFromMCPS_c       (1 << 3)
 
+#define gAppEvtStartCoordinator_c      (1 << 4)//New
+
 #define gAppEvt_FromMPL3115A2_c        (1 << 7) // New for Freescale sensor board
 #define gAppEvt_FromMMA8652_c          (1 << 9) // New
 #define gAppEvt_FromMAG3110_c          (1 << 10)// New
