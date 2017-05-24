@@ -115,6 +115,10 @@ static uint8_t mcPendingPackets;
 static anchor_t mMlmeNwkInputQueue;
 static anchor_t mMcpsNwkInputQueue;
 
+
+/* The current logical channel (frequency band) */
+static uint8_t mLogicalChannel;//New ueda
+
 /************************************************************************************
 *************************************************************************************
 * Public memory declarations
