@@ -1,0 +1,2216 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /*****************************************************************************
+    2:  * UART / SCI / USB / Serial Port implementation.
+    3:  *
+    4:  * (c) Copyright 2006, Freescale, Inc. All rights reserved.
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from Freescale Semiconductor.
+   10:  *
+   11:  *****************************************************************************/
+   12:  
+   13:  /* Note: This code is size optimized for the case where only one SCI port is
+   14:   * enabled. If both ports are enabled, it might be worthwhile to create
+   15:   * functions that take a port number as a parameter.
+   16:   */
+   17:  
+   18:  #include "Uart_Interface.h"
+   19:  #include "Uart.h"
+   20:  #include "IoConfig.h"
+   21:  #include "functionlib.h"
+   22:  #include "TS_Interface.h"
+   23:  #include "msgsystem.h"
+   24:  
+   25:  #ifdef PROCESSOR_MC1323X
+   26:  #include "PWRLib.h"
+   27:  #endif
+   28:  
+   29:  #ifndef gMacStandAlone_d
+   30:  #define gMacStandAlone_d 0
+   31:  #endif
+   32:  
+   33:  #if gMacStandAlone_d
+   34:    #include "Mac_Globals.h"
+   35:  #endif
+   36:  
+   37:  /************************************************************************************
+   38:  *************************************************************************************
+   39:  * Private prototypes
+   40:  *************************************************************************************/
+   41:  
+   42:  
+   43:  /*****************************************************************************
+   44:  ******************************************************************************
+   45:  * Public memory definitions
+   46:  ******************************************************************************
+   47:  *****************************************************************************/
+   48:  
+   49:  /* if neither UART enabled, then no code or data */
+   50:  #if gUart1_Enabled_d || gUart2_Enabled_d
+   51:  
+   52:  /* id for Uart task */
+   53:  tsTaskID_t gUartTaskId;
+   54:  
+   55:  
+   56:  /* Each port can store one unget byte. */
+   57:  #if gUart1_Enabled_d
+   58:  static bool_t uart1_ungetFlag = FALSE;
+   59:  static uint8_t uart1_ungetByte;
+   60:  bool_t Uart1_TxCompleteFlag = FALSE;
+   61:  #endif
+   62:  
+   63:  #if gUart2_Enabled_d
+   64:  static bool_t uart2_ungetFlag = FALSE;
+   65:  static uint8_t uart2_ungetByte;
+   66:  bool_t Uart2_TxCompleteFlag = FALSE;
+   67:  #endif
+   68:  
+   69:  /* The transmit code keeps a circular list of buffers to be sent. */
+   70:  /* Each SCI port has it's own list. */
+   71:  typedef struct SciTxBufRef_tag {
+   72:    unsigned char const *pBuf;
+   73:    void (*pfCallBack)(unsigned char const *pBuf);
+   74:  } SciTxBufRef_t;
+   75:  
+   76:  /* The leading index is the next position to store a buffer reference. */
+   77:  /* The trailing index is the buffer currently being transmitted. */
+   78:  /* Using a separate table for the buffer lengths reduces code size. */
+   79:  #if gUart1_Enabled_d
+   80:  static SciTxBufRef_t maSci1TxBufRefTable[gUart_TransmitBuffers_c];
+   81:  static index_t maSci1TxBufLenTable[gUart_TransmitBuffers_c];
+   82:  static index_t mSci1TxCurIndex;
+   83:  static index_t mSci1TxBufRefLeadingIndex;   /* Post-increment. */
+   84:  static index_t mSci1TxBufRefTrailingIndex;  /* Post-increment. */
+   85:  
+   86:  /*Callback table and index pointers*/
+   87:  static SciTxBufRef_t maSci1TxCallbackTable[gUart_TransmitBuffers_c];
+   88:  static index_t maSci1TxCallbackLeadingIndex = 0; 
+   89:  static index_t maSci1TxCallbackTrailingIndex = 0; 
+   90:  #endif
+   91:  
+   92:  #if gUart2_Enabled_d
+   93:  static SciTxBufRef_t maSci2TxBufRefTable[gUart_TransmitBuffers_c];
+   94:  static index_t maSci2TxBufLenTable[gUart_TransmitBuffers_c];
+   95:  static index_t mSci2TxCurIndex;
+   96:  static index_t mSci2TxBufRefLeadingIndex;   /* Post-increment. */
+   97:  static index_t mSci2TxBufRefTrailingIndex;  /* Post-increment. */
+   98:  /*Callback table and index pointers*/
+   99:  static SciTxBufRef_t maSci2TxCallbackTable[gUart_TransmitBuffers_c];
+  100:  static index_t maSci2TxCallbackLeadingIndex = 0; 
+  101:  static index_t maSci2TxCallbackTrailingIndex = 0; 
+  102:  #endif
+  103:  
+  104:  /* Each port has a small local circular Rx buffer to store data until the */
+  105:  /* application can retrieve it. In addition to the leading and trailing */
+  106:  /* indexes, the Rx code keeps a count of the number of bytes in the buffer. */
+  107:  #if gUart1_Enabled_d
+  108:  static   uint8_t maSci1RxBuf[gUart_ReceiveBufferSize_c];
+  109:  static   index_t mSci1RxBufLeadingIndex;      /* Post-increment. */
+  110:  static   index_t mSci1RxBufTrailingIndex;     /* Post-increment. */
+  111:  volatile index_t mSci1RxBufferByteCount;      /* # of bytes in buffer. */
+  112:  static void (*pfSci1RxCallBack)(void);
+  113:  #endif
+  114:  
+  115:  #if gUart2_Enabled_d
+  116:  static   uint8_t maSci2RxBuf[gUart_ReceiveBufferSize_c];
+  117:  static   index_t mSci2RxBufLeadingIndex;      /* Post-increment. */
+  118:  static   index_t mSci2RxBufTrailingIndex;     /* Post-increment. */
+  119:  volatile index_t mSci2RxBufferByteCount;      /* # of bytes in buffer. */
+  120:  static void (*pfSci2RxCallBack)(void);
+  121:  #endif
+  122:  
+  123:  /*****************************************************************************
+  124:  ******************************************************************************
+  125:  * Private memory definitions
+  126:  ******************************************************************************
+  127:  *****************************************************************************/
+  128:  
+  129:  /* Keep track of the high water mark in the Rx circular buffer. */
+  130:  #if gUart_Debug_d
+  131:  #if gUart1_Enabled_d
+  132:  static index_t uart1RxBufHighWaterMark = 0;
+  133:  #endif
+  134:  #if gUart2_Enabled_d
+  135:  static index_t uart2RxBufHighWaterMark = 0;
+  136:  #endif
+  137:  #endif
+  138:  
+  139:  /*****************************************************************************
+  140:  ******************************************************************************
+  141:  * Public functions
+  142:  ******************************************************************************
+  143:  *****************************************************************************/
+  144:  
+  145:  /*****************************************************************************/
+  146:  
+  147:  
+  148:  void Uart_ClearErrors(void) {
+  149:    uint8_t dummy;
+  150:  
+  151:  #if gUart1_Enabled_d
+  152:    while (SCI1S1 & (mSCIxS1_OR_c | mSCIxS1_NF_c | mSCIxS1_FE_c | mSCIxS1_PF_c)) {
+  0000 65       [3]             SKIP2 L3 ;abs = 0003
+  0001          L1:     
+  153:      dummy = SCI1D;
+  0001 b63f     [3]             LDA   63
+  0003          L3:     
+  0003 b63c     [3]             LDA   60
+  0005 a50f     [2]             BIT   #15
+  0007 26f8     [3]             BNE   L1 ;abs = 0001
+  154:    }
+  155:  #endif
+  156:  
+  157:  #if gUart2_Enabled_d
+  158:    while (SCI2S1 & (mSCIxS1_OR_c | mSCIxS1_NF_c | mSCIxS1_FE_c | mSCIxS1_PF_c)) {
+  159:      dummy = SCI2D;
+  160:    }
+  161:  #endif
+  162:  }                                       /* Uart_ClearErrors() */
+  0009 8d       [7]             RTC   
+  163:  
+  164:  /*****************************************************************************/
+  165:  
+  166:  
+  167:  /* Retrieve a byte from the driver's Rx buffer and store it at *pDst. */
+  168:  /* Return TRUE if a byte was retrieved; FALSE if the Rx buffer is empty. */
+  169:  bool_t Uart1_GetByteFromRxBuffer(unsigned char *pDst) {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 a7fe     [2]             AIS   #-2
+  170:  #if !gUart1_Enabled_d
+  171:    (void) pDst;
+  172:    return 0;
+  173:  #else
+  174:    unsigned char scic2, var;
+  175:  
+  176:    if (uart1_ungetFlag) {
+  0004 c60000   [4]             LDA   uart1_ungetFlag
+  0007 270a     [3]             BEQ   L13 ;abs = 0013
+  177:      uart1_ungetFlag = FALSE;
+  0009 4f       [1]             CLRA  
+  000a c70000   [4]             STA   uart1_ungetFlag
+  178:      *pDst = uart1_ungetByte;
+  000d c60000   [4]             LDA   uart1_ungetByte
+  0010 f7       [2]             STA   ,X
+  179:      return TRUE;
+  0011 203e     [3]             BRA   L51 ;abs = 0051
+  0013          L13:    
+  180:    }
+  181:  
+  182:    if (!mSci1RxBufferByteCount) {
+  0013 c60000   [4]             LDA   mSci1RxBufferByteCount
+  0016 273b     [3]             BEQ   L53 ;abs = 0053
+  183:      return FALSE;
+  184:    }
+  185:  
+  186:  #ifdef PROCESSOR_MC1323X
+  187:    IrqControlLib_ProtectFromMC1323xIrq(var);
+  0018 b645     [3]             LDA   69
+  001a a480     [2]             AND   #-128
+  001c 95       [2]             TSX   
+  001d f7       [2]             STA   ,X
+  001e 1e45     [5]             BSET  7,69
+  188:  #endif
+  189:    /* Disable the Rx interrupt while the counter is updated. */
+  190:    scic2 = SCI1C2;
+  0020 b63b     [3]             LDA   59
+  0022 e701     [3]             STA   1,X
+  191:    SCI1C2 &= ~mSCIxC2_RIE_c;
+  0024 1b3b     [5]             BCLR  5,59
+  192:  
+  193:    *pDst = maSci1RxBuf[mSci1RxBufTrailingIndex];
+  0026 ce0000   [4]             LDX   mSci1RxBufTrailingIndex
+  0029 8c       [1]             CLRH  
+  002a d60000   [4]             LDA   @maSci1RxBuf,X
+  002d 9efe03   [5]             LDHX  3,SP
+  0030 f7       [2]             STA   ,X
+  194:    if (++mSci1RxBufTrailingIndex >= sizeof(maSci1RxBuf)) 
+  0031 450000   [3]             LDHX  @mSci1RxBufTrailingIndex
+  0034 7c       [4]             INC   ,X
+  0035 c60000   [4]             LDA   mSci1RxBufTrailingIndex
+  0038 a120     [2]             CMP   #32
+  003a 2504     [3]             BCS   L40 ;abs = 0040
+  195:    {
+  196:      mSci1RxBufTrailingIndex = 0;
+  003c 4f       [1]             CLRA  
+  003d c70000   [4]             STA   mSci1RxBufTrailingIndex
+  0040          L40:    
+  197:    }
+  198:  
+  199:    --mSci1RxBufferByteCount;
+  0040 450000   [3]             LDHX  @mSci1RxBufferByteCount
+  0043 7a       [4]             DEC   ,X
+  200:  #if gUart1_EnableHWFlowControl_d
+  201:    if (mSci1RxBufferByteCount <= gUart_RxFlowControlSkew_d) 
+  202:    {
+  203:      Uart1_EnableFlow();
+  204:    }
+  205:  #endif
+  206:    SCI1C2 = scic2;
+  0044 95       [2]             TSX   
+  0045 e601     [3]             LDA   1,X
+  0047 b73b     [3]             STA   59
+  207:  #ifdef PROCESSOR_MC1323X
+  208:    IrqControlLib_UnprotectFromMC1323xIrq(var);
+  0049 7d       [3]             TST   ,X
+  004a 2703     [3]             BEQ   L4F ;abs = 004f
+  004c 1e45     [5]             BSET  7,69
+  004e 65       [3]             SKIP2 L51 ;abs = 0051
+  004f          L4F:    
+  004f 1f45     [5]             BCLR  7,69
+  0051          L51:    
+  209:  #endif
+  210:  
+  211:    return TRUE;
+  0051 a601     [2]             LDA   #1
+  0053          L53:    
+  212:  #endif
+  213:  }                                       /* Uart1_GetBytesFromRxBuffer() */
+  0053 a704     [2]             AIS   #4
+  0055 8d       [7]             RTC   
+  214:  
+  215:  /**************************************/
+  216:  
+  217:  bool_t Uart2_GetByteFromRxBuffer(unsigned char *pDst) {
+  218:  #if !gUart2_Enabled_d
+  219:    (void) pDst;
+  220:    return 0;
+  0000 4f       [1]             CLRA  
+  221:  #else
+  222:    unsigned char scic2;
+  223:  
+  224:    if (uart2_ungetFlag) {
+  225:      uart2_ungetFlag = FALSE;
+  226:      *pDst = uart2_ungetByte;
+  227:      return TRUE;
+  228:    }
+  229:  
+  230:    if (!mSci2RxBufferByteCount) {
+  231:      return FALSE;
+  232:    }
+  233:    
+  234:    /* Disable the Rx interrupt while the counter is updated. */
+  235:    scic2 = SCI2C2;
+  236:    SCI2C2 &= ~mSCIxC2_RIE_c;
+  237:    
+  238:    *pDst = maSci2RxBuf[mSci2RxBufTrailingIndex];
+  239:    if (++mSci2RxBufTrailingIndex >= sizeof(maSci2RxBuf)) 
+  240:    {
+  241:      mSci2RxBufTrailingIndex = 0;
+  242:    }
+  243:  
+  244:    --mSci2RxBufferByteCount;
+  245:  #if gUart2_EnableHWFlowControl_d
+  246:    if (mSci2RxBufferByteCount <= gUart_RxFlowControlSkew_d) 
+  247:    {
+  248:      Uart2_EnableFlow();
+  249:    }
+  250:  #endif
+  251:    SCI2C2 = scic2;
+  252:  
+  253:    return TRUE;
+  254:  #endif
+  255:  }                                       /* Uart2_GetBytesFromRxBuffer() */
+  0001 8d       [7]             RTC   
+  256:  
+  257:  /*****************************************************************************/
+  258:  
+  259:  /* Return TRUE if there is data still not sent. */
+  260:  bool_t Uart1_IsTxActive(void) {
+  261:  #if !gUart1_Enabled_d
+  262:    return FALSE;
+  263:  #else
+  264:    return (maSci1TxBufLenTable[mSci1TxBufRefTrailingIndex] != 0) || (!(SCI1S1 & 0x40));
+  0000 ce0000   [4]             LDX   mSci1TxBufRefTrailingIndex
+  0003 8c       [1]             CLRH  
+  0004 d60000   [4]             LDA   @maSci1TxBufLenTable,X
+  0007 2604     [3]             BNE   LD ;abs = 000d
+  0009 4f       [1]             CLRA  
+  000a 0c3c02   [5]             BRSET 6,60,LF ;abs = 000f
+  000d          LD:     
+  000d a601     [2]             LDA   #1
+  000f          LF:     
+  265:  #endif
+  266:  }                                       /* Uart1_IsTxActive() */
+  000f 8d       [7]             RTC   
+  267:  
+  268:  /*****************************************************************************/
+  269:  
+  270:  bool_t Uart2_IsTxActive(void) {
+  271:  #if !gUart2_Enabled_d
+  272:    return FALSE;
+  0000 4f       [1]             CLRA  
+  273:  #else
+  274:    return (maSci2TxBufLenTable[mSci2TxBufRefTrailingIndex] != 0) || (!(SCI2S1 & 0x40));
+  275:  #endif
+  276:  }                                       /* Uart2_IsTxActive() */
+  0001 8d       [7]             RTC   
+  277:  
+  278:  /*****************************************************************************/
+  279:  
+  280:  /* Initialize the serial port(s) and this module's local data. */
+  281:  void Uart_ModuleInit(void) {
+  282:  #if gUart1_Enabled_d
+  283:    
+  284:    Uart1_SetBaud(gUartDefaultBaud_c);
+  0000 ae34     [2]             LDX   #52
+  0002 8c       [1]             CLRH  
+  0003 ac000000 [8]             CALL  Uart1_SetBaud
+  285:  
+  286:    SCI1C1 = mSCI1C1_Init_c;
+  0007 3f3a     [5]             CLR   58
+  287:    SCI1C3 = mSCI1C3_Init_c;
+  0009 6e0f3e   [4]             MOV   #15,62
+  288:    SCI1C2 = mSCI1C2_Init_c;
+  000c 6e0c3b   [4]             MOV   #12,59
+  289:    
+  290:    #ifdef PROCESSOR_MC1323X
+  291:      SCI1C4 = mSCI1C4_Init_c;
+  000f 4f       [1]             CLRA  
+  0010 c71804   [4]             STA   6148
+  292:    #endif
+  293:  
+  294:    #if gUart1_EnableHWFlowControl_d
+  295:      Uart1_EnableFlow();
+  296:    #endif
+  297:  #endif
+  298:  
+  299:  #if gUart2_Enabled_d
+  300:    SCI2BDH = (gUartDefaultBaud_c >> 8);
+  301:    SCI2BDL = (gUartDefaultBaud_c & 0xFF);
+  302:  
+  303:    SCI2C1 = mSCI2C1_Init_c;
+  304:    SCI2C3 = mSCI2C3_Init_c;
+  305:    SCI2C2 = mSCI2C2_Init_c;
+  306:    
+  307:    #if gUart2_EnableHWFlowControl_d
+  308:      Uart2_EnableFlow();
+  309:    #endif
+  310:  #endif
+  311:  
+  312:    Uart_ClearErrors();
+  0013 ac000000 [8]             CALL  Uart_ClearErrors
+  313:    Uart_TaskInit();
+  0017 ac000000 [8]             CALL  Uart_TaskInit
+  314:  }                                       /* Uart_ModuleInit() */
+  001b 8d       [7]             RTC   
+  315:  
+  316:  
+  317:  /*****************************************************************************/
+  318:  
+  319:  /* Set a pointer to the function to be called whenever a byte is received. */
+  320:  /* If the pointer is set to NULL, turn off the Rx interrupt and clear the Rx */
+  321:  /* buffer. */
+  322:  void Uart1_SetRxCallBack(void (*pfCallBack)(void)) {
+  323:  #if !gUart1_Enabled_d
+  324:    (void) pfCallBack;
+  325:  #else
+  326:    pfSci1RxCallBack = pfCallBack;
+  0000 9efe05   [5]             LDHX  5,SP
+  0003 960001   [5]             STHX  pfSci1RxCallBack:1
+  0006 95       [2]             TSX   
+  0007 e603     [3]             LDA   3,X
+  0009 c70000   [4]             STA   pfSci1RxCallBack
+  327:  
+  328:    if (pfSci1RxCallBack) {
+  000c 450000   [3]             LDHX  @pfSci1RxCallBack
+  000f cd0000   [6]             JSR   _CMP24_RC
+  0012 00               DC.B  0
+  0013 0000             DC.W  0
+  0015 2703     [3]             BEQ   L1A ;abs = 001a
+  329:      SCI1C2 |= mSCIxC2_RIE_c;
+  0017 1a3b     [5]             BSET  5,59
+  330:    } else {
+  0019 8d       [7]             RTC   
+  001a          L1A:    
+  331:      SCI1C2 &= ~mSCIxC2_RIE_c;
+  001a 1b3b     [5]             BCLR  5,59
+  332:      mSci1RxBufLeadingIndex = mSci1RxBufTrailingIndex = mSci1RxBufferByteCount = 0;
+  001c 4f       [1]             CLRA  
+  001d 450000   [3]             LDHX  @mSci1RxBufferByteCount
+  0020 f7       [2]             STA   ,X
+  0021 f6       [3]             LDA   ,X
+  0022 c70000   [4]             STA   mSci1RxBufTrailingIndex
+  0025 c70000   [4]             STA   mSci1RxBufLeadingIndex
+  333:    }
+  334:  #endif
+  335:  }                                       /* Uart1_SetRxCallback() */
+  0028 8d       [7]             RTC   
+  336:  
+  337:  /*****************************************************************************/
+  338:  
+  339:  void Uart2_SetRxCallBack(void (*pfCallBack)(void)) {
+  340:  #if !gUart2_Enabled_d
+  341:    (void) pfCallBack;
+  342:  #else
+  343:    pfSci2RxCallBack = pfCallBack;
+  344:  
+  345:    if (pfSci2RxCallBack) {
+  346:      SCI2C2 |= mSCIxC2_RIE_c;
+  347:    } else {
+  348:      SCI2C2 &= ~mSCIxC2_RIE_c;
+  349:      mSci2RxBufLeadingIndex = mSci2RxBufTrailingIndex = mSci2RxBufferByteCount = 0;
+  350:    }
+  351:  #endif
+  352:  }                                       /* Uart2_SetRxCallback() */
+  0000 8d       [7]             RTC   
+  353:  
+  354:  /*****************************************************************************/
+  355:  
+  356:  /* Set the UART baud rate. */
+  357:  void Uart1_SetBaud(UartBaudRate_t baudRate) {
+  358:  #if !gUart1_Enabled_d
+  359:    (void) baudRate;
+  360:  #else
+  361:  #ifdef PROCESSOR_MC1323X 
+  362:    SCI1BDH = (baudRate >> 8) | (1 << 6);
+  0000 8b       [2]             PSHH  
+  0001 86       [3]             PULA  
+  0002 aa40     [2]             ORA   #64
+  0004 b738     [3]             STA   56
+  363:  #else
+  364:    SCI1BDH = baudRate >> 8;
+  365:  #endif 
+  366:   SCI1BDL = baudRate & 0xFF;
+  0006 bf39     [3]             STX   57
+  367:    
+  368:    #ifdef PROCESSOR_MC1323X    
+  369:      switch(baudRate)
+  0008 aff8     [2]             AIX   #-8
+  000a 8b       [2]             PSHH  
+  000b 86       [3]             PULA  
+  000c cd0000   [6]             JSR   _Jump_Table_Header_Addr
+  000f 033a             DC.W  826
+  0011 06a3             DC.W  L6A3
+  0013 069e             DC.W  L69E
+  0015 06a3             DC.W  L6A3
+  0017 06a3             DC.W  L6A3
+  0019 06a3             DC.W  L6A3
+  001b 06a3             DC.W  L6A3
+  001d 06a3             DC.W  L6A3
+  001f 06a3             DC.W  L6A3
+  0021 06a3             DC.W  L6A3
+  0023 06a3             DC.W  L6A3
+  0025 069b             DC.W  L69B
+  0027 06a3             DC.W  L6A3
+  0029 06a3             DC.W  L6A3
+  002b 06a3             DC.W  L6A3
+  002d 06a3             DC.W  L6A3
+  002f 06a3             DC.W  L6A3
+  0031 06a3             DC.W  L6A3
+  0033 06a3             DC.W  L6A3
+  0035 06a3             DC.W  L6A3
+  0037 0697             DC.W  L697
+  0039 06a3             DC.W  L6A3
+  003b 06a3             DC.W  L6A3
+  003d 06a3             DC.W  L6A3
+  003f 06a3             DC.W  L6A3
+  0041 06a3             DC.W  L6A3
+  0043 06a3             DC.W  L6A3
+  0045 06a3             DC.W  L6A3
+  0047 06a3             DC.W  L6A3
+  0049 06a3             DC.W  L6A3
+  004b 06a3             DC.W  L6A3
+  004d 06a3             DC.W  L6A3
+  004f 06a3             DC.W  L6A3
+  0051 06a3             DC.W  L6A3
+  0053 06a3             DC.W  L6A3
+  0055 06a3             DC.W  L6A3
+  0057 06a3             DC.W  L6A3
+  0059 06a3             DC.W  L6A3
+  005b 06a3             DC.W  L6A3
+  005d 06a3             DC.W  L6A3
+  005f 06a3             DC.W  L6A3
+  0061 06a3             DC.W  L6A3
+  0063 06a3             DC.W  L6A3
+  0065 06a3             DC.W  L6A3
+  0067 06a3             DC.W  L6A3
+  0069 06a3             DC.W  L6A3
+  006b 0693             DC.W  L693
+  006d 06a3             DC.W  L6A3
+  006f 06a3             DC.W  L6A3
+  0071 06a3             DC.W  L6A3
+  0073 06a3             DC.W  L6A3
+  0075 06a3             DC.W  L6A3
+  0077 06a3             DC.W  L6A3
+  0079 06a3             DC.W  L6A3
+  007b 06a3             DC.W  L6A3
+  007d 06a3             DC.W  L6A3
+  007f 06a3             DC.W  L6A3
+  0081 06a3             DC.W  L6A3
+  0083 06a3             DC.W  L6A3
+  0085 06a3             DC.W  L6A3
+  0087 06a3             DC.W  L6A3
+  0089 06a3             DC.W  L6A3
+  008b 06a3             DC.W  L6A3
+  008d 06a3             DC.W  L6A3
+  008f 06a3             DC.W  L6A3
+  0091 06a3             DC.W  L6A3
+  0093 06a3             DC.W  L6A3
+  0095 06a3             DC.W  L6A3
+  0097 06a3             DC.W  L6A3
+  0099 06a3             DC.W  L6A3
+  009b 06a3             DC.W  L6A3
+  009d 06a3             DC.W  L6A3
+  009f 06a3             DC.W  L6A3
+  00a1 06a3             DC.W  L6A3
+  00a3 06a3             DC.W  L6A3
+  00a5 06a3             DC.W  L6A3
+  00a7 06a3             DC.W  L6A3
+  00a9 06a3             DC.W  L6A3
+  00ab 06a3             DC.W  L6A3
+  00ad 06a3             DC.W  L6A3
+  00af 06a3             DC.W  L6A3
+  00b1 06a3             DC.W  L6A3
+  00b3 06a3             DC.W  L6A3
+  00b5 06a3             DC.W  L6A3
+  00b7 06a3             DC.W  L6A3
+  00b9 06a3             DC.W  L6A3
+  00bb 06a3             DC.W  L6A3
+  00bd 06a3             DC.W  L6A3
+  00bf 06a3             DC.W  L6A3
+  00c1 06a3             DC.W  L6A3
+  00c3 06a3             DC.W  L6A3
+  00c5 06a3             DC.W  L6A3
+  00c7 06a3             DC.W  L6A3
+  00c9 06a3             DC.W  L6A3
+  00cb 06a3             DC.W  L6A3
+  00cd 06a3             DC.W  L6A3
+  00cf 06a3             DC.W  L6A3
+  00d1 06a3             DC.W  L6A3
+  00d3 068f             DC.W  L68F
+  00d5 06a3             DC.W  L6A3
+  00d7 06a3             DC.W  L6A3
+  00d9 06a3             DC.W  L6A3
+  00db 06a3             DC.W  L6A3
+  00dd 06a3             DC.W  L6A3
+  00df 06a3             DC.W  L6A3
+  00e1 06a3             DC.W  L6A3
+  00e3 06a3             DC.W  L6A3
+  00e5 06a3             DC.W  L6A3
+  00e7 06a3             DC.W  L6A3
+  00e9 06a3             DC.W  L6A3
+  00eb 06a3             DC.W  L6A3
+  00ed 06a3             DC.W  L6A3
+  00ef 06a3             DC.W  L6A3
+  00f1 06a3             DC.W  L6A3
+  00f3 06a3             DC.W  L6A3
+  00f5 06a3             DC.W  L6A3
+  00f7 06a3             DC.W  L6A3
+  00f9 06a3             DC.W  L6A3
+  00fb 06a3             DC.W  L6A3
+  00fd 06a3             DC.W  L6A3
+  00ff 06a3             DC.W  L6A3
+  0101 06a3             DC.W  L6A3
+  0103 06a3             DC.W  L6A3
+  0105 06a3             DC.W  L6A3
+  0107 06a3             DC.W  L6A3
+  0109 06a3             DC.W  L6A3
+  010b 06a3             DC.W  L6A3
+  010d 06a3             DC.W  L6A3
+  010f 06a3             DC.W  L6A3
+  0111 06a3             DC.W  L6A3
+  0113 06a3             DC.W  L6A3
+  0115 06a3             DC.W  L6A3
+  0117 06a3             DC.W  L6A3
+  0119 06a3             DC.W  L6A3
+  011b 06a3             DC.W  L6A3
+  011d 06a3             DC.W  L6A3
+  011f 06a3             DC.W  L6A3
+  0121 06a3             DC.W  L6A3
+  0123 06a3             DC.W  L6A3
+  0125 06a3             DC.W  L6A3
+  0127 06a3             DC.W  L6A3
+  0129 06a3             DC.W  L6A3
+  012b 06a3             DC.W  L6A3
+  012d 06a3             DC.W  L6A3
+  012f 06a3             DC.W  L6A3
+  0131 06a3             DC.W  L6A3
+  0133 06a3             DC.W  L6A3
+  0135 06a3             DC.W  L6A3
+  0137 06a3             DC.W  L6A3
+  0139 06a3             DC.W  L6A3
+  013b 06a3             DC.W  L6A3
+  013d 06a3             DC.W  L6A3
+  013f 06a3             DC.W  L6A3
+  0141 06a3             DC.W  L6A3
+  0143 06a3             DC.W  L6A3
+  0145 06a3             DC.W  L6A3
+  0147 06a3             DC.W  L6A3
+  0149 06a3             DC.W  L6A3
+  014b 06a3             DC.W  L6A3
+  014d 06a3             DC.W  L6A3
+  014f 06a3             DC.W  L6A3
+  0151 06a3             DC.W  L6A3
+  0153 06a3             DC.W  L6A3
+  0155 06a3             DC.W  L6A3
+  0157 06a3             DC.W  L6A3
+  0159 06a3             DC.W  L6A3
+  015b 06a3             DC.W  L6A3
+  015d 06a3             DC.W  L6A3
+  015f 06a3             DC.W  L6A3
+  0161 06a3             DC.W  L6A3
+  0163 06a3             DC.W  L6A3
+  0165 06a3             DC.W  L6A3
+  0167 06a3             DC.W  L6A3
+  0169 06a3             DC.W  L6A3
+  016b 06a3             DC.W  L6A3
+  016d 06a3             DC.W  L6A3
+  016f 06a3             DC.W  L6A3
+  0171 06a3             DC.W  L6A3
+  0173 06a3             DC.W  L6A3
+  0175 06a3             DC.W  L6A3
+  0177 06a3             DC.W  L6A3
+  0179 06a3             DC.W  L6A3
+  017b 06a3             DC.W  L6A3
+  017d 06a3             DC.W  L6A3
+  017f 06a3             DC.W  L6A3
+  0181 06a3             DC.W  L6A3
+  0183 06a3             DC.W  L6A3
+  0185 06a3             DC.W  L6A3
+  0187 06a3             DC.W  L6A3
+  0189 06a3             DC.W  L6A3
+  018b 06a3             DC.W  L6A3
+  018d 06a3             DC.W  L6A3
+  018f 06a3             DC.W  L6A3
+  0191 06a3             DC.W  L6A3
+  0193 06a3             DC.W  L6A3
+  0195 06a3             DC.W  L6A3
+  0197 06a3             DC.W  L6A3
+  0199 06a3             DC.W  L6A3
+  019b 06a3             DC.W  L6A3
+  019d 06a3             DC.W  L6A3
+  019f 06a3             DC.W  L6A3
+  01a1 06a3             DC.W  L6A3
+  01a3 068b             DC.W  L68B
+  01a5 06a3             DC.W  L6A3
+  01a7 06a3             DC.W  L6A3
+  01a9 06a3             DC.W  L6A3
+  01ab 06a3             DC.W  L6A3
+  01ad 06a3             DC.W  L6A3
+  01af 06a3             DC.W  L6A3
+  01b1 06a3             DC.W  L6A3
+  01b3 06a3             DC.W  L6A3
+  01b5 06a3             DC.W  L6A3
+  01b7 06a3             DC.W  L6A3
+  01b9 06a3             DC.W  L6A3
+  01bb 06a3             DC.W  L6A3
+  01bd 06a3             DC.W  L6A3
+  01bf 06a3             DC.W  L6A3
+  01c1 06a3             DC.W  L6A3
+  01c3 06a3             DC.W  L6A3
+  01c5 06a3             DC.W  L6A3
+  01c7 06a3             DC.W  L6A3
+  01c9 06a3             DC.W  L6A3
+  01cb 06a3             DC.W  L6A3
+  01cd 06a3             DC.W  L6A3
+  01cf 06a3             DC.W  L6A3
+  01d1 06a3             DC.W  L6A3
+  01d3 06a3             DC.W  L6A3
+  01d5 06a3             DC.W  L6A3
+  01d7 06a3             DC.W  L6A3
+  01d9 06a3             DC.W  L6A3
+  01db 06a3             DC.W  L6A3
+  01dd 06a3             DC.W  L6A3
+  01df 06a3             DC.W  L6A3
+  01e1 06a3             DC.W  L6A3
+  01e3 06a3             DC.W  L6A3
+  01e5 06a3             DC.W  L6A3
+  01e7 06a3             DC.W  L6A3
+  01e9 06a3             DC.W  L6A3
+  01eb 06a3             DC.W  L6A3
+  01ed 06a3             DC.W  L6A3
+  01ef 06a3             DC.W  L6A3
+  01f1 06a3             DC.W  L6A3
+  01f3 06a3             DC.W  L6A3
+  01f5 06a3             DC.W  L6A3
+  01f7 06a3             DC.W  L6A3
+  01f9 06a3             DC.W  L6A3
+  01fb 06a3             DC.W  L6A3
+  01fd 06a3             DC.W  L6A3
+  01ff 06a3             DC.W  L6A3
+  0201 06a3             DC.W  L6A3
+  0203 06a3             DC.W  L6A3
+  0205 06a3             DC.W  L6A3
+  0207 06a3             DC.W  L6A3
+  0209 06a3             DC.W  L6A3
+  020b 06a3             DC.W  L6A3
+  020d 06a3             DC.W  L6A3
+  020f 06a3             DC.W  L6A3
+  0211 06a3             DC.W  L6A3
+  0213 06a3             DC.W  L6A3
+  0215 06a3             DC.W  L6A3
+  0217 06a3             DC.W  L6A3
+  0219 06a3             DC.W  L6A3
+  021b 06a3             DC.W  L6A3
+  021d 06a3             DC.W  L6A3
+  021f 06a3             DC.W  L6A3
+  0221 06a3             DC.W  L6A3
+  0223 06a3             DC.W  L6A3
+  0225 06a3             DC.W  L6A3
+  0227 06a3             DC.W  L6A3
+  0229 06a3             DC.W  L6A3
+  022b 06a3             DC.W  L6A3
+  022d 06a3             DC.W  L6A3
+  022f 06a3             DC.W  L6A3
+  0231 06a3             DC.W  L6A3
+  0233 06a3             DC.W  L6A3
+  0235 06a3             DC.W  L6A3
+  0237 06a3             DC.W  L6A3
+  0239 06a3             DC.W  L6A3
+  023b 06a3             DC.W  L6A3
+  023d 06a3             DC.W  L6A3
+  023f 06a3             DC.W  L6A3
+  0241 06a3             DC.W  L6A3
+  0243 06a3             DC.W  L6A3
+  0245 06a3             DC.W  L6A3
+  0247 06a3             DC.W  L6A3
+  0249 06a3             DC.W  L6A3
+  024b 06a3             DC.W  L6A3
+  024d 06a3             DC.W  L6A3
+  024f 06a3             DC.W  L6A3
+  0251 06a3             DC.W  L6A3
+  0253 06a3             DC.W  L6A3
+  0255 06a3             DC.W  L6A3
+  0257 06a3             DC.W  L6A3
+  0259 06a3             DC.W  L6A3
+  025b 06a3             DC.W  L6A3
+  025d 06a3             DC.W  L6A3
+  025f 06a3             DC.W  L6A3
+  0261 06a3             DC.W  L6A3
+  0263 06a3             DC.W  L6A3
+  0265 06a3             DC.W  L6A3
+  0267 06a3             DC.W  L6A3
+  0269 06a3             DC.W  L6A3
+  026b 06a3             DC.W  L6A3
+  026d 06a3             DC.W  L6A3
+  026f 06a3             DC.W  L6A3
+  0271 06a3             DC.W  L6A3
+  0273 06a3             DC.W  L6A3
+  0275 06a3             DC.W  L6A3
+  0277 06a3             DC.W  L6A3
+  0279 06a3             DC.W  L6A3
+  027b 06a3             DC.W  L6A3
+  027d 06a3             DC.W  L6A3
+  027f 06a3             DC.W  L6A3
+  0281 06a3             DC.W  L6A3
+  0283 06a3             DC.W  L6A3
+  0285 06a3             DC.W  L6A3
+  0287 06a3             DC.W  L6A3
+  0289 06a3             DC.W  L6A3
+  028b 06a3             DC.W  L6A3
+  028d 06a3             DC.W  L6A3
+  028f 06a3             DC.W  L6A3
+  0291 06a3             DC.W  L6A3
+  0293 06a3             DC.W  L6A3
+  0295 06a3             DC.W  L6A3
+  0297 06a3             DC.W  L6A3
+  0299 06a3             DC.W  L6A3
+  029b 06a3             DC.W  L6A3
+  029d 06a3             DC.W  L6A3
+  029f 06a3             DC.W  L6A3
+  02a1 06a3             DC.W  L6A3
+  02a3 06a3             DC.W  L6A3
+  02a5 06a3             DC.W  L6A3
+  02a7 06a3             DC.W  L6A3
+  02a9 06a3             DC.W  L6A3
+  02ab 06a3             DC.W  L6A3
+  02ad 06a3             DC.W  L6A3
+  02af 06a3             DC.W  L6A3
+  02b1 06a3             DC.W  L6A3
+  02b3 06a3             DC.W  L6A3
+  02b5 06a3             DC.W  L6A3
+  02b7 06a3             DC.W  L6A3
+  02b9 06a3             DC.W  L6A3
+  02bb 06a3             DC.W  L6A3
+  02bd 06a3             DC.W  L6A3
+  02bf 06a3             DC.W  L6A3
+  02c1 06a3             DC.W  L6A3
+  02c3 06a3             DC.W  L6A3
+  02c5 06a3             DC.W  L6A3
+  02c7 06a3             DC.W  L6A3
+  02c9 06a3             DC.W  L6A3
+  02cb 06a3             DC.W  L6A3
+  02cd 06a3             DC.W  L6A3
+  02cf 06a3             DC.W  L6A3
+  02d1 06a3             DC.W  L6A3
+  02d3 06a3             DC.W  L6A3
+  02d5 06a3             DC.W  L6A3
+  02d7 06a3             DC.W  L6A3
+  02d9 06a3             DC.W  L6A3
+  02db 06a3             DC.W  L6A3
+  02dd 06a3             DC.W  L6A3
+  02df 06a3             DC.W  L6A3
+  02e1 06a3             DC.W  L6A3
+  02e3 06a3             DC.W  L6A3
+  02e5 06a3             DC.W  L6A3
+  02e7 06a3             DC.W  L6A3
+  02e9 06a3             DC.W  L6A3
+  02eb 06a3             DC.W  L6A3
+  02ed 06a3             DC.W  L6A3
+  02ef 06a3             DC.W  L6A3
+  02f1 06a3             DC.W  L6A3
+  02f3 06a3             DC.W  L6A3
+  02f5 06a3             DC.W  L6A3
+  02f7 06a3             DC.W  L6A3
+  02f9 06a3             DC.W  L6A3
+  02fb 06a3             DC.W  L6A3
+  02fd 06a3             DC.W  L6A3
+  02ff 06a3             DC.W  L6A3
+  0301 06a3             DC.W  L6A3
+  0303 06a3             DC.W  L6A3
+  0305 06a3             DC.W  L6A3
+  0307 06a3             DC.W  L6A3
+  0309 06a3             DC.W  L6A3
+  030b 06a3             DC.W  L6A3
+  030d 06a3             DC.W  L6A3
+  030f 06a3             DC.W  L6A3
+  0311 06a3             DC.W  L6A3
+  0313 06a3             DC.W  L6A3
+  0315 06a3             DC.W  L6A3
+  0317 06a3             DC.W  L6A3
+  0319 06a3             DC.W  L6A3
+  031b 06a3             DC.W  L6A3
+  031d 06a3             DC.W  L6A3
+  031f 06a3             DC.W  L6A3
+  0321 06a3             DC.W  L6A3
+  0323 06a3             DC.W  L6A3
+  0325 06a3             DC.W  L6A3
+  0327 06a3             DC.W  L6A3
+  0329 06a3             DC.W  L6A3
+  032b 06a3             DC.W  L6A3
+  032d 06a3             DC.W  L6A3
+  032f 06a3             DC.W  L6A3
+  0331 06a3             DC.W  L6A3
+  0333 06a3             DC.W  L6A3
+  0335 06a3             DC.W  L6A3
+  0337 06a3             DC.W  L6A3
+  0339 06a3             DC.W  L6A3
+  033b 06a3             DC.W  L6A3
+  033d 06a3             DC.W  L6A3
+  033f 06a3             DC.W  L6A3
+  0341 06a3             DC.W  L6A3
+  0343 0687             DC.W  L687
+  0345 06a3             DC.W  L6A3
+  0347 06a3             DC.W  L6A3
+  0349 06a3             DC.W  L6A3
+  034b 06a3             DC.W  L6A3
+  034d 06a3             DC.W  L6A3
+  034f 06a3             DC.W  L6A3
+  0351 06a3             DC.W  L6A3
+  0353 06a3             DC.W  L6A3
+  0355 06a3             DC.W  L6A3
+  0357 06a3             DC.W  L6A3
+  0359 06a3             DC.W  L6A3
+  035b 06a3             DC.W  L6A3
+  035d 06a3             DC.W  L6A3
+  035f 06a3             DC.W  L6A3
+  0361 06a3             DC.W  L6A3
+  0363 06a3             DC.W  L6A3
+  0365 06a3             DC.W  L6A3
+  0367 06a3             DC.W  L6A3
+  0369 06a3             DC.W  L6A3
+  036b 06a3             DC.W  L6A3
+  036d 06a3             DC.W  L6A3
+  036f 06a3             DC.W  L6A3
+  0371 06a3             DC.W  L6A3
+  0373 06a3             DC.W  L6A3
+  0375 06a3             DC.W  L6A3
+  0377 06a3             DC.W  L6A3
+  0379 06a3             DC.W  L6A3
+  037b 06a3             DC.W  L6A3
+  037d 06a3             DC.W  L6A3
+  037f 06a3             DC.W  L6A3
+  0381 06a3             DC.W  L6A3
+  0383 06a3             DC.W  L6A3
+  0385 06a3             DC.W  L6A3
+  0387 06a3             DC.W  L6A3
+  0389 06a3             DC.W  L6A3
+  038b 06a3             DC.W  L6A3
+  038d 06a3             DC.W  L6A3
+  038f 06a3             DC.W  L6A3
+  0391 06a3             DC.W  L6A3
+  0393 06a3             DC.W  L6A3
+  0395 06a3             DC.W  L6A3
+  0397 06a3             DC.W  L6A3
+  0399 06a3             DC.W  L6A3
+  039b 06a3             DC.W  L6A3
+  039d 06a3             DC.W  L6A3
+  039f 06a3             DC.W  L6A3
+  03a1 06a3             DC.W  L6A3
+  03a3 06a3             DC.W  L6A3
+  03a5 06a3             DC.W  L6A3
+  03a7 06a3             DC.W  L6A3
+  03a9 06a3             DC.W  L6A3
+  03ab 06a3             DC.W  L6A3
+  03ad 06a3             DC.W  L6A3
+  03af 06a3             DC.W  L6A3
+  03b1 06a3             DC.W  L6A3
+  03b3 06a3             DC.W  L6A3
+  03b5 06a3             DC.W  L6A3
+  03b7 06a3             DC.W  L6A3
+  03b9 06a3             DC.W  L6A3
+  03bb 06a3             DC.W  L6A3
+  03bd 06a3             DC.W  L6A3
+  03bf 06a3             DC.W  L6A3
+  03c1 06a3             DC.W  L6A3
+  03c3 06a3             DC.W  L6A3
+  03c5 06a3             DC.W  L6A3
+  03c7 06a3             DC.W  L6A3
+  03c9 06a3             DC.W  L6A3
+  03cb 06a3             DC.W  L6A3
+  03cd 06a3             DC.W  L6A3
+  03cf 06a3             DC.W  L6A3
+  03d1 06a3             DC.W  L6A3
+  03d3 06a3             DC.W  L6A3
+  03d5 06a3             DC.W  L6A3
+  03d7 06a3             DC.W  L6A3
+  03d9 06a3             DC.W  L6A3
+  03db 06a3             DC.W  L6A3
+  03dd 06a3             DC.W  L6A3
+  03df 06a3             DC.W  L6A3
+  03e1 06a3             DC.W  L6A3
+  03e3 06a3             DC.W  L6A3
+  03e5 06a3             DC.W  L6A3
+  03e7 06a3             DC.W  L6A3
+  03e9 06a3             DC.W  L6A3
+  03eb 06a3             DC.W  L6A3
+  03ed 06a3             DC.W  L6A3
+  03ef 06a3             DC.W  L6A3
+  03f1 06a3             DC.W  L6A3
+  03f3 06a3             DC.W  L6A3
+  03f5 06a3             DC.W  L6A3
+  03f7 06a3             DC.W  L6A3
+  03f9 06a3             DC.W  L6A3
+  03fb 06a3             DC.W  L6A3
+  03fd 06a3             DC.W  L6A3
+  03ff 06a3             DC.W  L6A3
+  0401 06a3             DC.W  L6A3
+  0403 06a3             DC.W  L6A3
+  0405 06a3             DC.W  L6A3
+  0407 06a3             DC.W  L6A3
+  0409 06a3             DC.W  L6A3
+  040b 06a3             DC.W  L6A3
+  040d 06a3             DC.W  L6A3
+  040f 06a3             DC.W  L6A3
+  0411 06a3             DC.W  L6A3
+  0413 06a3             DC.W  L6A3
+  0415 06a3             DC.W  L6A3
+  0417 06a3             DC.W  L6A3
+  0419 06a3             DC.W  L6A3
+  041b 06a3             DC.W  L6A3
+  041d 06a3             DC.W  L6A3
+  041f 06a3             DC.W  L6A3
+  0421 06a3             DC.W  L6A3
+  0423 06a3             DC.W  L6A3
+  0425 06a3             DC.W  L6A3
+  0427 06a3             DC.W  L6A3
+  0429 06a3             DC.W  L6A3
+  042b 06a3             DC.W  L6A3
+  042d 06a3             DC.W  L6A3
+  042f 06a3             DC.W  L6A3
+  0431 06a3             DC.W  L6A3
+  0433 06a3             DC.W  L6A3
+  0435 06a3             DC.W  L6A3
+  0437 06a3             DC.W  L6A3
+  0439 06a3             DC.W  L6A3
+  043b 06a3             DC.W  L6A3
+  043d 06a3             DC.W  L6A3
+  043f 06a3             DC.W  L6A3
+  0441 06a3             DC.W  L6A3
+  0443 06a3             DC.W  L6A3
+  0445 06a3             DC.W  L6A3
+  0447 06a3             DC.W  L6A3
+  0449 06a3             DC.W  L6A3
+  044b 06a3             DC.W  L6A3
+  044d 06a3             DC.W  L6A3
+  044f 06a3             DC.W  L6A3
+  0451 06a3             DC.W  L6A3
+  0453 06a3             DC.W  L6A3
+  0455 06a3             DC.W  L6A3
+  0457 06a3             DC.W  L6A3
+  0459 06a3             DC.W  L6A3
+  045b 06a3             DC.W  L6A3
+  045d 06a3             DC.W  L6A3
+  045f 06a3             DC.W  L6A3
+  0461 06a3             DC.W  L6A3
+  0463 06a3             DC.W  L6A3
+  0465 06a3             DC.W  L6A3
+  0467 06a3             DC.W  L6A3
+  0469 06a3             DC.W  L6A3
+  046b 06a3             DC.W  L6A3
+  046d 06a3             DC.W  L6A3
+  046f 06a3             DC.W  L6A3
+  0471 06a3             DC.W  L6A3
+  0473 06a3             DC.W  L6A3
+  0475 06a3             DC.W  L6A3
+  0477 06a3             DC.W  L6A3
+  0479 06a3             DC.W  L6A3
+  047b 06a3             DC.W  L6A3
+  047d 06a3             DC.W  L6A3
+  047f 06a3             DC.W  L6A3
+  0481 06a3             DC.W  L6A3
+  0483 06a3             DC.W  L6A3
+  0485 06a3             DC.W  L6A3
+  0487 06a3             DC.W  L6A3
+  0489 06a3             DC.W  L6A3
+  048b 06a3             DC.W  L6A3
+  048d 06a3             DC.W  L6A3
+  048f 06a3             DC.W  L6A3
+  0491 06a3             DC.W  L6A3
+  0493 06a3             DC.W  L6A3
+  0495 06a3             DC.W  L6A3
+  0497 06a3             DC.W  L6A3
+  0499 06a3             DC.W  L6A3
+  049b 06a3             DC.W  L6A3
+  049d 06a3             DC.W  L6A3
+  049f 06a3             DC.W  L6A3
+  04a1 06a3             DC.W  L6A3
+  04a3 06a3             DC.W  L6A3
+  04a5 06a3             DC.W  L6A3
+  04a7 06a3             DC.W  L6A3
+  04a9 06a3             DC.W  L6A3
+  04ab 06a3             DC.W  L6A3
+  04ad 06a3             DC.W  L6A3
+  04af 06a3             DC.W  L6A3
+  04b1 06a3             DC.W  L6A3
+  04b3 06a3             DC.W  L6A3
+  04b5 06a3             DC.W  L6A3
+  04b7 06a3             DC.W  L6A3
+  04b9 06a3             DC.W  L6A3
+  04bb 06a3             DC.W  L6A3
+  04bd 06a3             DC.W  L6A3
+  04bf 06a3             DC.W  L6A3
+  04c1 06a3             DC.W  L6A3
+  04c3 06a3             DC.W  L6A3
+  04c5 06a3             DC.W  L6A3
+  04c7 06a3             DC.W  L6A3
+  04c9 06a3             DC.W  L6A3
+  04cb 06a3             DC.W  L6A3
+  04cd 06a3             DC.W  L6A3
+  04cf 06a3             DC.W  L6A3
+  04d1 06a3             DC.W  L6A3
+  04d3 06a3             DC.W  L6A3
+  04d5 06a3             DC.W  L6A3
+  04d7 06a3             DC.W  L6A3
+  04d9 06a3             DC.W  L6A3
+  04db 06a3             DC.W  L6A3
+  04dd 06a3             DC.W  L6A3
+  04df 06a3             DC.W  L6A3
+  04e1 06a3             DC.W  L6A3
+  04e3 06a3             DC.W  L6A3
+  04e5 06a3             DC.W  L6A3
+  04e7 06a3             DC.W  L6A3
+  04e9 06a3             DC.W  L6A3
+  04eb 06a3             DC.W  L6A3
+  04ed 06a3             DC.W  L6A3
+  04ef 06a3             DC.W  L6A3
+  04f1 06a3             DC.W  L6A3
+  04f3 06a3             DC.W  L6A3
+  04f5 06a3             DC.W  L6A3
+  04f7 06a3             DC.W  L6A3
+  04f9 06a3             DC.W  L6A3
+  04fb 06a3             DC.W  L6A3
+  04fd 06a3             DC.W  L6A3
+  04ff 06a3             DC.W  L6A3
+  0501 06a3             DC.W  L6A3
+  0503 06a3             DC.W  L6A3
+  0505 06a3             DC.W  L6A3
+  0507 06a3             DC.W  L6A3
+  0509 06a3             DC.W  L6A3
+  050b 06a3             DC.W  L6A3
+  050d 06a3             DC.W  L6A3
+  050f 06a3             DC.W  L6A3
+  0511 06a3             DC.W  L6A3
+  0513 06a3             DC.W  L6A3
+  0515 06a3             DC.W  L6A3
+  0517 06a3             DC.W  L6A3
+  0519 06a3             DC.W  L6A3
+  051b 06a3             DC.W  L6A3
+  051d 06a3             DC.W  L6A3
+  051f 06a3             DC.W  L6A3
+  0521 06a3             DC.W  L6A3
+  0523 06a3             DC.W  L6A3
+  0525 06a3             DC.W  L6A3
+  0527 06a3             DC.W  L6A3
+  0529 06a3             DC.W  L6A3
+  052b 06a3             DC.W  L6A3
+  052d 06a3             DC.W  L6A3
+  052f 06a3             DC.W  L6A3
+  0531 06a3             DC.W  L6A3
+  0533 06a3             DC.W  L6A3
+  0535 06a3             DC.W  L6A3
+  0537 06a3             DC.W  L6A3
+  0539 06a3             DC.W  L6A3
+  053b 06a3             DC.W  L6A3
+  053d 06a3             DC.W  L6A3
+  053f 06a3             DC.W  L6A3
+  0541 06a3             DC.W  L6A3
+  0543 06a3             DC.W  L6A3
+  0545 06a3             DC.W  L6A3
+  0547 06a3             DC.W  L6A3
+  0549 06a3             DC.W  L6A3
+  054b 06a3             DC.W  L6A3
+  054d 06a3             DC.W  L6A3
+  054f 06a3             DC.W  L6A3
+  0551 06a3             DC.W  L6A3
+  0553 06a3             DC.W  L6A3
+  0555 06a3             DC.W  L6A3
+  0557 06a3             DC.W  L6A3
+  0559 06a3             DC.W  L6A3
+  055b 06a3             DC.W  L6A3
+  055d 06a3             DC.W  L6A3
+  055f 06a3             DC.W  L6A3
+  0561 06a3             DC.W  L6A3
+  0563 06a3             DC.W  L6A3
+  0565 06a3             DC.W  L6A3
+  0567 06a3             DC.W  L6A3
+  0569 06a3             DC.W  L6A3
+  056b 06a3             DC.W  L6A3
+  056d 06a3             DC.W  L6A3
+  056f 06a3             DC.W  L6A3
+  0571 06a3             DC.W  L6A3
+  0573 06a3             DC.W  L6A3
+  0575 06a3             DC.W  L6A3
+  0577 06a3             DC.W  L6A3
+  0579 06a3             DC.W  L6A3
+  057b 06a3             DC.W  L6A3
+  057d 06a3             DC.W  L6A3
+  057f 06a3             DC.W  L6A3
+  0581 06a3             DC.W  L6A3
+  0583 06a3             DC.W  L6A3
+  0585 06a3             DC.W  L6A3
+  0587 06a3             DC.W  L6A3
+  0589 06a3             DC.W  L6A3
+  058b 06a3             DC.W  L6A3
+  058d 06a3             DC.W  L6A3
+  058f 06a3             DC.W  L6A3
+  0591 06a3             DC.W  L6A3
+  0593 06a3             DC.W  L6A3
+  0595 06a3             DC.W  L6A3
+  0597 06a3             DC.W  L6A3
+  0599 06a3             DC.W  L6A3
+  059b 06a3             DC.W  L6A3
+  059d 06a3             DC.W  L6A3
+  059f 06a3             DC.W  L6A3
+  05a1 06a3             DC.W  L6A3
+  05a3 06a3             DC.W  L6A3
+  05a5 06a3             DC.W  L6A3
+  05a7 06a3             DC.W  L6A3
+  05a9 06a3             DC.W  L6A3
+  05ab 06a3             DC.W  L6A3
+  05ad 06a3             DC.W  L6A3
+  05af 06a3             DC.W  L6A3
+  05b1 06a3             DC.W  L6A3
+  05b3 06a3             DC.W  L6A3
+  05b5 06a3             DC.W  L6A3
+  05b7 06a3             DC.W  L6A3
+  05b9 06a3             DC.W  L6A3
+  05bb 06a3             DC.W  L6A3
+  05bd 06a3             DC.W  L6A3
+  05bf 06a3             DC.W  L6A3
+  05c1 06a3             DC.W  L6A3
+  05c3 06a3             DC.W  L6A3
+  05c5 06a3             DC.W  L6A3
+  05c7 06a3             DC.W  L6A3
+  05c9 06a3             DC.W  L6A3
+  05cb 06a3             DC.W  L6A3
+  05cd 06a3             DC.W  L6A3
+  05cf 06a3             DC.W  L6A3
+  05d1 06a3             DC.W  L6A3
+  05d3 06a3             DC.W  L6A3
+  05d5 06a3             DC.W  L6A3
+  05d7 06a3             DC.W  L6A3
+  05d9 06a3             DC.W  L6A3
+  05db 06a3             DC.W  L6A3
+  05dd 06a3             DC.W  L6A3
+  05df 06a3             DC.W  L6A3
+  05e1 06a3             DC.W  L6A3
+  05e3 06a3             DC.W  L6A3
+  05e5 06a3             DC.W  L6A3
+  05e7 06a3             DC.W  L6A3
+  05e9 06a3             DC.W  L6A3
+  05eb 06a3             DC.W  L6A3
+  05ed 06a3             DC.W  L6A3
+  05ef 06a3             DC.W  L6A3
+  05f1 06a3             DC.W  L6A3
+  05f3 06a3             DC.W  L6A3
+  05f5 06a3             DC.W  L6A3
+  05f7 06a3             DC.W  L6A3
+  05f9 06a3             DC.W  L6A3
+  05fb 06a3             DC.W  L6A3
+  05fd 06a3             DC.W  L6A3
+  05ff 06a3             DC.W  L6A3
+  0601 06a3             DC.W  L6A3
+  0603 06a3             DC.W  L6A3
+  0605 06a3             DC.W  L6A3
+  0607 06a3             DC.W  L6A3
+  0609 06a3             DC.W  L6A3
+  060b 06a3             DC.W  L6A3
+  060d 06a3             DC.W  L6A3
+  060f 06a3             DC.W  L6A3
+  0611 06a3             DC.W  L6A3
+  0613 06a3             DC.W  L6A3
+  0615 06a3             DC.W  L6A3
+  0617 06a3             DC.W  L6A3
+  0619 06a3             DC.W  L6A3
+  061b 06a3             DC.W  L6A3
+  061d 06a3             DC.W  L6A3
+  061f 06a3             DC.W  L6A3
+  0621 06a3             DC.W  L6A3
+  0623 06a3             DC.W  L6A3
+  0625 06a3             DC.W  L6A3
+  0627 06a3             DC.W  L6A3
+  0629 06a3             DC.W  L6A3
+  062b 06a3             DC.W  L6A3
+  062d 06a3             DC.W  L6A3
+  062f 06a3             DC.W  L6A3
+  0631 06a3             DC.W  L6A3
+  0633 06a3             DC.W  L6A3
+  0635 06a3             DC.W  L6A3
+  0637 06a3             DC.W  L6A3
+  0639 06a3             DC.W  L6A3
+  063b 06a3             DC.W  L6A3
+  063d 06a3             DC.W  L6A3
+  063f 06a3             DC.W  L6A3
+  0641 06a3             DC.W  L6A3
+  0643 06a3             DC.W  L6A3
+  0645 06a3             DC.W  L6A3
+  0647 06a3             DC.W  L6A3
+  0649 06a3             DC.W  L6A3
+  064b 06a3             DC.W  L6A3
+  064d 06a3             DC.W  L6A3
+  064f 06a3             DC.W  L6A3
+  0651 06a3             DC.W  L6A3
+  0653 06a3             DC.W  L6A3
+  0655 06a3             DC.W  L6A3
+  0657 06a3             DC.W  L6A3
+  0659 06a3             DC.W  L6A3
+  065b 06a3             DC.W  L6A3
+  065d 06a3             DC.W  L6A3
+  065f 06a3             DC.W  L6A3
+  0661 06a3             DC.W  L6A3
+  0663 06a3             DC.W  L6A3
+  0665 06a3             DC.W  L6A3
+  0667 06a3             DC.W  L6A3
+  0669 06a3             DC.W  L6A3
+  066b 06a3             DC.W  L6A3
+  066d 06a3             DC.W  L6A3
+  066f 06a3             DC.W  L6A3
+  0671 06a3             DC.W  L6A3
+  0673 06a3             DC.W  L6A3
+  0675 06a3             DC.W  L6A3
+  0677 06a3             DC.W  L6A3
+  0679 06a3             DC.W  L6A3
+  067b 06a3             DC.W  L6A3
+  067d 06a3             DC.W  L6A3
+  067f 06a3             DC.W  L6A3
+  0681 06a3             DC.W  L6A3
+  0683 06a3             DC.W  L6A3
+  0685 068b             DC.W  L68B
+  0687          L687:   
+  370:      {
+  371:        case Baudrate_1200:
+  372:                SCI1C4 = gUARTBaudRate1200Div_c;
+  373:                break;
+  374:                
+  375:        case Baudrate_2400:              
+  376:                SCI1C4 = gUARTBaudRate2400Div_c;
+  0687 a615     [2]             LDA   #21
+  377:                break;
+  0689 2015     [3]             BRA   L6A0 ;abs = 06a0
+  068b          L68B:   
+  378:                
+  379:        case Baudrate_4800:
+  380:                SCI1C4 = gUARTBaudRate4800Div_c;
+  068b a60b     [2]             LDA   #11
+  068d 2011     [3]             BRA   L6A0 ;abs = 06a0
+  068f          L68F:   
+  381:                break;
+  382:                
+  383:        case Baudrate_9600:              
+  384:                SCI1C4 = gUARTBaudRate9600Div_c;
+  068f a605     [2]             LDA   #5
+  385:                break;   
+  0691 200d     [3]             BRA   L6A0 ;abs = 06a0
+  0693          L693:   
+  386:                
+  387:        case Baudrate_19200:
+  388:                SCI1C4 = gUARTBaudRate19200Div_c;
+  0693 a603     [2]             LDA   #3
+  389:                break;
+  0695 2009     [3]             BRA   L6A0 ;abs = 06a0
+  0697          L697:   
+  390:                
+  391:        case Baudrate_38400:              
+  392:                SCI1C4 = gUARTBaudRate38400Div_c;
+  0697 a601     [2]             LDA   #1
+  393:                break;
+  0699 2005     [3]             BRA   L6A0 ;abs = 06a0
+  069b          L69B:   
+  394:                
+  395:        case Baudrate_57600:
+  396:                SCI1C4 = gUARTBaudRate57600Div_c;
+  069b a60c     [2]             LDA   #12
+  397:                break;
+  069d 65       [3]             SKIP2 L6A0 ;abs = 06a0
+  069e          L69E:   
+  398:                
+  399:        case Baudrate_115200:              
+  400:                SCI1C4 = gUARTBaudRate115200Div_c;
+  069e a616     [2]             LDA   #22
+  06a0          L6A0:   
+  06a0 c71804   [4]             STA   6148
+  06a3          L6A3:   
+  401:                break;                                      
+  402:      }    
+  403:    #endif
+  404:  #endif
+  405:  }                                       /* Uart1_SetBaud() */
+  06a3 8d       [7]             RTC   
+  406:  
+  407:  /*****************************************************************************/
+  408:  
+  409:  void Uart2_SetBaud(UartBaudRate_t baudRate) {
+  410:  #if !gUart2_Enabled_d
+  411:    (void) baudRate;
+  412:  #else
+  413:    SCI2BDH = baudRate >> 8;
+  414:    SCI2BDL = baudRate & 0xFF;   
+  415:  #endif
+  416:  }                                       /* Uart2_SetBaud() */
+  0000 8d       [7]             RTC   
+  417:  
+  418:  /*****************************************************************************/
+  419:  
+  420:  /* Begin transmitting size bytes of data from *pBuffer. */
+  421:  /* Returns FALSE if there are no more slots in the buffer reference table. */
+  422:  bool_t Uart1_Transmit(unsigned char const *pBuf, index_t bufLen, void (*pfCallBack)(unsigned char const *pBuf)) {
+  0000 8b       [2]             PSHH  
+  423:  #if !gUart1_Enabled_d
+  424:    (void) pBuf;
+  425:    (void) bufLen;
+  426:    (void) pfCallBack;
+  427:    return FALSE;
+  428:  #else
+  429:    bool_t status = FALSE;
+  0001 95       [2]             TSX   
+  0002 7f       [4]             CLR   ,X
+  430:    /* Handle empty buffers. */
+  431:    if (!bufLen) 
+  0003 6d07     [4]             TST   7,X
+  0005 261e     [3]             BNE   L25 ;abs = 0025
+  432:    {
+  433:      if(pfCallBack)
+  0007 af04     [2]             AIX   #4
+  0009 cd0000   [6]             JSR   _CMP24_RC
+  000c 00               DC.B  0
+  000d 0000             DC.W  0
+  000f 2710     [3]             BEQ   L21 ;abs = 0021
+  434:        (*pfCallBack)(pBuf);
+  0011 9efe09   [5]             LDHX  9,SP
+  0014 89       [2]             PSHX  
+  0015 8b       [2]             PSHH  
+  0016 9efe08   [5]             LDHX  8,SP
+  0019 9ee607   [4]             LDA   7,SP
+  001c 87       [2]             PSHA  
+  001d ac000000 [8]             CALL  _CALL_STAR08_FAR
+  0021          L21:    
+  435:      return TRUE;
+  0021 a601     [2]             LDA   #1
+  436:    }
+  437:  
+  438:  
+  439:    /* Room for one more? */
+  440:    if (maSci1TxBufLenTable[mSci1TxBufRefLeadingIndex] == 0) 
+  441:    {
+  442:         
+  443:     /* Disable the Tx ISR before updating the shared variables */
+  444:     SCI1C2 &= ~mSCIxC2_TIE_c;
+  445:     
+  446:     maSci1TxBufRefTable[mSci1TxBufRefLeadingIndex].pBuf = pBuf;
+  447:     maSci1TxBufRefTable[mSci1TxBufRefLeadingIndex].pfCallBack = pfCallBack;
+  448:     /* This has to be last, in case the Tx ISR finishes with the previous */
+  449:     /* buffer while this function is executing. */
+  450:     maSci1TxBufLenTable[mSci1TxBufRefLeadingIndex] = bufLen;
+  451:     
+  452:     if (++mSci1TxBufRefLeadingIndex >= NumberOfElements(maSci1TxBufRefTable)) {
+  453:       mSci1TxBufRefLeadingIndex = 0;
+  454:     }
+  455:    
+  456:     Uart1_TxCompleteFlag = FALSE;
+  457:     /* Enable the transmit interrupt. Harmless if the interrupt is already */
+  458:     /* enabled. */
+  459:     SCI1C2 |= mSCIxC2_TIE_c;
+  460:     
+  461:     status = TRUE;
+  462:    }
+  463:  
+  464:    return status; 
+  465:  #endif
+  466:  }                                       /* Uart1_Transmit() */
+  0023 8a       [3]             PULH  
+  0024 8d       [7]             RTC   
+  0025          L25:    
+  0025 ce0000   [4]             LDX   mSci1TxBufRefLeadingIndex
+  0028 8c       [1]             CLRH  
+  0029 d60000   [4]             LDA   @maSci1TxBufLenTable,X
+  002c 2644     [3]             BNE   L72 ;abs = 0072
+  002e 1f3b     [5]             BCLR  7,59
+  0030 89       [2]             PSHX  
+  0031 a605     [2]             LDA   #5
+  0033 42       [5]             MUL   
+  0034 97       [1]             TAX   
+  0035 9ee60b   [4]             LDA   11,SP
+  0038 d70001   [4]             STA   @maSci1TxBufRefTable:1,X
+  003b 9ee60a   [4]             LDA   10,SP
+  003e d70000   [4]             STA   @maSci1TxBufRefTable,X
+  0041 9ee608   [4]             LDA   8,SP
+  0044 d70004   [4]             STA   @maSci1TxBufRefTable:4,X
+  0047 9ee607   [4]             LDA   7,SP
+  004a d70003   [4]             STA   @maSci1TxBufRefTable:3,X
+  004d 9ee606   [4]             LDA   6,SP
+  0050 d70002   [4]             STA   @maSci1TxBufRefTable:2,X
+  0053 9ee609   [4]             LDA   9,SP
+  0056 88       [3]             PULX  
+  0057 d70000   [4]             STA   @maSci1TxBufLenTable,X
+  005a 450000   [3]             LDHX  @mSci1TxBufRefLeadingIndex
+  005d 7c       [4]             INC   ,X
+  005e c60000   [4]             LDA   mSci1TxBufRefLeadingIndex
+  0061 a103     [2]             CMP   #3
+  0063 2504     [3]             BCS   L69 ;abs = 0069
+  0065 4f       [1]             CLRA  
+  0066 c70000   [4]             STA   mSci1TxBufRefLeadingIndex
+  0069          L69:    
+  0069 4f       [1]             CLRA  
+  006a c70000   [4]             STA   Uart1_TxCompleteFlag
+  006d 1e3b     [5]             BSET  7,59
+  006f 4c       [1]             INCA  
+  0070 95       [2]             TSX   
+  0071 f7       [2]             STA   ,X
+  0072          L72:    
+  0072 95       [2]             TSX   
+  0073 f6       [3]             LDA   ,X
+  0074 8a       [3]             PULH  
+  0075 8d       [7]             RTC   
+  467:  
+  468:  /**************************************/
+  469:  bool_t Uart2_Transmit(unsigned char const *pBuf, index_t bufLen, void (*pfCallBack)(unsigned char const *pBuf)) {
+  470:  #if !gUart2_Enabled_d
+  471:    (void) pBuf;
+  472:    (void) bufLen;
+  473:    (void) pfCallBack;
+  474:    return FALSE;
+  0000 4f       [1]             CLRA  
+  475:  #else
+  476:    bool_t status = FALSE;
+  477:    /* Handle empty buffers. */
+  478:    if (!bufLen) 
+  479:    {
+  480:      if(pfCallBack)
+  481:        (*pfCallBack)(pBuf);
+  482:      return TRUE;
+  483:    }
+  484:    
+  485:    /* Room for one more? */
+  486:    if (maSci2TxBufLenTable[mSci2TxBufRefLeadingIndex] == 0) 
+  487:    {
+  488:      /* Disable the Tx ISR before reading or updating the shared variables */
+  489:     SCI2C2 &= ~mSCIxC2_TIE_c;   
+  490:     
+  491:     maSci2TxBufRefTable[mSci2TxBufRefLeadingIndex].pBuf = pBuf;
+  492:     maSci2TxBufRefTable[mSci2TxBufRefLeadingIndex].pfCallBack = pfCallBack;
+  493:     /* This has to be last, in case the Tx ISR finishes with the previous */
+  494:     /* buffer while this function is executing. */
+  495:     maSci2TxBufLenTable[mSci2TxBufRefLeadingIndex] = bufLen;
+  496:  
+  497:     if (++mSci2TxBufRefLeadingIndex >= NumberOfElements(maSci2TxBufRefTable)) {
+  498:       mSci2TxBufRefLeadingIndex = 0;
+  499:     }
+  500:     Uart2_TxCompleteFlag = FALSE;
+  501:     /* Enable the transmit interrupt. Harmless if the interrupt is already */
+  502:     /* enabled. */
+  503:     
+  504:     SCI2C2 |= mSCIxC2_TIE_c;
+  505:     status = TRUE;
+  506:    } 
+  507:    
+  508:    return status;
+  509:  #endif
+  510:  }                                       /* Uart2_Transmit() */
+  0001 8d       [7]             RTC   
+  511:  
+  512:  /*****************************************************************************/
+  513:  
+  514:  /* Shut down the serial port(s). */
+  515:  void Uart_ModuleUninit(void) {
+  516:  #if gUart1_Enabled_d
+  517:    SCI1C1 = mSCIxC1_Reset_c;
+  0000 3f3a     [5]             CLR   58
+  518:    SCI1C3 = mSCIxC2_Reset_c;
+  0002 3f3e     [5]             CLR   62
+  519:    SCI1C2 = mSCIxC3_Reset_c;
+  0004 3f3b     [5]             CLR   59
+  520:    
+  521:    #ifdef PROCESSOR_MC1323X
+  522:      SCI1C4 = mSCIxC4_Reset_c;    
+  0006 4f       [1]             CLRA  
+  0007 c71804   [4]             STA   6148
+  523:    #endif 
+  524:  #endif
+  525:  
+  526:  #if gUart2_Enabled_d
+  527:    SCI2C1 = mSCIxC1_Reset_c;
+  528:    SCI2C3 = mSCIxC2_Reset_c;
+  529:    SCI2C2 = mSCIxC3_Reset_c;
+  530:  #endif
+  531:  }                                       /* Uart_ModuleUninit() */
+  000a 8d       [7]             RTC   
+  532:  
+  533:  /*****************************************************************************/
+  534:  
+  535:  /* Unget a byte: store the byte so that it will be returned by the next call */
+  536:  /* to the get byte function. Also call the Rx call back. */
+  537:  void Uart1_UngetByte(unsigned char byte) {
+  538:  #if !gUart1_Enabled_d
+  539:    (void) byte;
+  540:  #else
+  541:    /* If the un get flag is already true, there isn't anything we can */
+  542:    /* do about it. Not much point in checking. Its up to the called to */
+  543:    /* use this function correctly. */
+  544:    uart1_ungetFlag = TRUE;
+  0000 ae01     [2]             LDX   #1
+  0002 cf0000   [4]             STX   uart1_ungetFlag
+  545:    uart1_ungetByte = byte;
+  0005 c70000   [4]             STA   uart1_ungetByte
+  546:  
+  547:    /* Likewise, it is the caller's responsibility to not call this function */
+  548:    /* if the call back pointer is not valid. */
+  549:    pfSci1RxCallBack();
+  0008 320001   [5]             LDHX  pfSci1RxCallBack:1
+  000b c60000   [4]             LDA   pfSci1RxCallBack
+  000e 8b       [2]             PSHH  
+  000f 8b       [2]             PSHH  
+  0010 8b       [2]             PSHH  
+  0011 ac000000 [8]             CALL  _CALL_STAR08_FAR
+  550:  
+  551:  #endif
+  552:  }                                       /* Uart1_UngetByte() */
+  0015 8d       [7]             RTC   
+  553:  
+  554:  /*****************************************************************************/
+  555:  
+  556:  void Uart2_UngetByte(unsigned char byte) {
+  557:  #if !gUart2_Enabled_d
+  558:    (void) byte;
+  559:  #else
+  560:    uart2_ungetFlag = TRUE;
+  561:    uart2_ungetByte = byte;
+  562:    pfSci2RxCallBack();
+  563:  #endif
+  564:  }                                       /* Uart2_UngetByte() */
+  0000 8d       [7]             RTC   
+  565:  
+  566:  /*****************************************************************************/
+  567:  
+  568:  void Uart_Task(event_t events)
+  569:  {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  570:    void (*pfCallBack)(unsigned char const *pBuf);
+  571:  
+  572:  #if gUart1_Enabled_d
+  573:  
+  574:    if( events & gRxSci1Event_c ) {
+  0002 9f       [1]             TXA   
+  0003 a501     [2]             BIT   #1
+  0005 270d     [3]             BEQ   L14 ;abs = 0014
+  575:      pfSci1RxCallBack();
+  0007 320001   [5]             LDHX  pfSci1RxCallBack:1
+  000a c60000   [4]             LDA   pfSci1RxCallBack
+  000d 8b       [2]             PSHH  
+  000e 8b       [2]             PSHH  
+  000f 8b       [2]             PSHH  
+  0010 ac000000 [8]             CALL  _CALL_STAR08_FAR
+  0014          L14:    
+  576:    }
+  577:  
+  578:    if( events & gTxSci1Event_c ) {
+  0014 95       [2]             TSX   
+  0015 e601     [3]             LDA   1,X
+  0017 a504     [2]             BIT   #4
+  0019 2639     [3]             BNE   L54 ;abs = 0054
+  001b 203f     [3]             BRA   L5C ;abs = 005c
+  001d          L1D:    
+  579:      /*Tx call back event received - run through the callback table and execute any pending
+  580:      Callbacks.
+  581:      */
+  582:      while (maSci1TxCallbackLeadingIndex != maSci1TxCallbackTrailingIndex) {    
+  583:         pfCallBack = maSci1TxCallbackTable[maSci1TxCallbackTrailingIndex].pfCallBack;
+  001d c60000   [4]             LDA   maSci1TxCallbackTrailingIndex
+  0020 ae05     [2]             LDX   #5
+  0022 42       [5]             MUL   
+  0023 8c       [1]             CLRH  
+  0024 97       [1]             TAX   
+  0025 9ebe0003 [6]             LDHX  @maSci1TxCallbackTable:3,X
+  0029 8b       [2]             PSHH  
+  002a 8c       [1]             CLRH  
+  002b 89       [2]             PSHX  
+  002c 97       [1]             TAX   
+  002d d60002   [4]             LDA   @maSci1TxCallbackTable:2,X
+  584:        /*Call calback with buffer info as parameter*/
+  585:         pfCallBack(maSci1TxCallbackTable[maSci1TxCallbackTrailingIndex].pBuf);
+  0030 9ebe0000 [6]             LDHX  @maSci1TxCallbackTable,X
+  0034 89       [2]             PSHX  
+  0035 8b       [2]             PSHH  
+  0036 95       [2]             TSX   
+  0037 ee03     [3]             LDX   3,X
+  0039 89       [2]             PSHX  
+  003a 95       [2]             TSX   
+  003b ee03     [3]             LDX   3,X
+  003d 8a       [3]             PULH  
+  003e 87       [2]             PSHA  
+  003f ac000000 [8]             CALL  _CALL_STAR08_FAR
+  586:        /*increment and wrap around trailing index*/      
+  587:        if (++maSci1TxCallbackTrailingIndex >= NumberOfElements(maSci1TxCallbackTable)) {
+  0043 450000   [3]             LDHX  @maSci1TxCallbackTrailingIndex
+  0046 7c       [4]             INC   ,X
+  0047 c60000   [4]             LDA   maSci1TxCallbackTrailingIndex
+  004a a103     [2]             CMP   #3
+  004c a702     [2]             AIS   #2
+  004e 2504     [3]             BCS   L54 ;abs = 0054
+  588:          maSci1TxCallbackTrailingIndex = 0;    
+  0050 4f       [1]             CLRA  
+  0051 c70000   [4]             STA   maSci1TxCallbackTrailingIndex
+  0054          L54:    
+  0054 c60000   [4]             LDA   maSci1TxCallbackTrailingIndex
+  0057 c10000   [4]             CMP   maSci1TxCallbackLeadingIndex
+  005a 26c1     [3]             BNE   L1D ;abs = 001d
+  005c          L5C:    
+  589:        }
+  590:      } /* while */
+  591:    } /*if events ...*/
+  592:  
+  593:  
+  594:  #endif gUart1_Enabled_d
+  595:    
+  596:  #if gUart2_Enabled_d
+  597:  
+  598:    if( events & gRxSci2Event_c ) {
+  599:      pfSci2RxCallBack();
+  600:    } 
+  601:  
+  602:    if( events & gTxSci2Event_c ) {
+  603:      /*Tx call back event received - run through the callback table and execute any pending
+  604:      Callbacks.
+  605:      */
+  606:      while (maSci2TxCallbackLeadingIndex != maSci2TxCallbackTrailingIndex) {    
+  607:         pfCallBack = maSci2TxCallbackTable[maSci2TxCallbackTrailingIndex].pfCallBack;
+  608:        /*Call calback with buffer info as parameter*/
+  609:         pfCallBack(maSci2TxCallbackTable[maSci2TxCallbackTrailingIndex].pBuf);
+  610:        /*increment and wrap around trailing index*/
+  611:        if (++maSci2TxCallbackTrailingIndex >= NumberOfElements(maSci2TxCallbackTable)) {
+  612:          maSci2TxCallbackTrailingIndex = 0;    
+  613:        }
+  614:      } /* while */
+  615:    } /*if events ...*/
+  616:  
+  617:  #endif gUart2_Enabled_d
+  618:  }
+  005c a702     [2]             AIS   #2
+  005e 8d       [7]             RTC   
+  619:  
+  620:  
+  621:  /*****************************************************************************/
+  622:  
+  623:  
+  624:  /* Interrupts service routines (for QE128 these routines are placed in non-paged memory) */
+  625:  /*****************************************************************************/
+  626:  /* Place it in NON_BANKED memory */
+  627:  #ifdef MEMORY_MODEL_BANKED
+  628:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+  629:  #else
+  630:  #pragma CODE_SEG DEFAULT
+  631:  #endif /* MEMORY_MODEL_BANKED */
+  632:  #if gUart1_Enabled_d
+  633:  INTERRUPT_KEYWORD void Uart1_ErrorIsr(void) {
+  0000 8b       [2]             PSHH  
+  634:    uint8_t dummy;
+  635:    while (SCI1S1 & (mSCIxS1_OR_c | mSCIxS1_NF_c | mSCIxS1_FE_c | mSCIxS1_PF_c)) {
+  0001 65       [3]             SKIP2 L4 ;abs = 0004
+  0002          L2:     
+  636:      dummy = SCI1D;
+  0002 b63f     [3]             LDA   63
+  0004          L4:     
+  0004 b63c     [3]             LDA   60
+  0006 a50f     [2]             BIT   #15
+  0008 26f8     [3]             BNE   L2 ;abs = 0002
+  637:    }
+  638:  }                                       /* Uart1_ErrorIsr() */
+  000a 8a       [3]             PULH  
+  000b 80       [9]             RTI   
+  639:  #endif
+  640:  
+  641:  /*****************************************************************************/
+  642:  
+  643:  #if gUart2_Enabled_d
+  644:  INTERRUPT_KEYWORD void Uart2_ErrorIsr(void) {
+  645:    uint8_t dummy;
+  646:    while (SCI2S1 & (mSCIxS1_OR_c | mSCIxS1_NF_c | mSCIxS1_FE_c | mSCIxS1_PF_c)) {
+  647:      dummy = SCI2D;
+  648:    }
+  649:  }                                       /* Uart2_ErrorIsr() */
+  650:  #endif
+  651:  
+  652:  /*****************************************************************************/
+  653:  #ifdef PROCESSOR_MC1323X 
+  654:  extern uint8_t mLPMFlag;
+  655:  extern volatile uint8_t enetredStop3;
+  656:  volatile uint8_t uartWakeUp;
+  657:  #endif
+  658:  
+  659:  /* Rx ISR. If there is room, store the byte in the Rx circular buffer. */
+  660:  #if gUart1_Enabled_d
+  661:  INTERRUPT_KEYWORD void Uart1_RxIsr(void) {
+  0000 8b       [2]             PSHH  
+  662:    uint8_t dummy;
+  663:  
+  664:    /* The HCS08 does not save H on interrupt. */
+  665:    __asm {
+  666:      PSHH
+  0001 8b       [2]             PSHH  
+  667:    }
+  668:  
+  669:  #ifdef PROCESSOR_MC1323X 
+  670:  if (SCI1S2 & (1 << 6))
+  0002 0d3d05   [5]             BRCLR 6,61,LA ;abs = 000a
+  671:  {
+  672:  	SCI1S2 = SCI1S2;
+  0005 4e3d3d   [5]             MOV   61,61
+  673:  	PWRLib_MCU_WakeupReason.Bits.FromSCI = TRUE;
+  0008 1200     [5]             BSET  1,PWRLib_MCU_WakeupReason
+  000a          LA:     
+  674:  }
+  675:  #endif 
+  676:    
+  677:  #if gUart_Debug_d
+  678:    if (mSci1RxBufferByteCount > uart1RxBufHighWaterMark) {
+  679:      uart1RxBufHighWaterMark = mSci1RxBufferByteCount;
+  680:    }
+  681:  
+  682:  /*   if (mSci1RxBufferByteCount >= sizeof(maSci1RxBuf)) { */
+  683:  /*     /\* Out of room in the Rx buffer. *\/ */
+  684:  /*     while (mSci1RxBufferByteCount);    /\* assert(). *\/ */
+  685:  /*     __asm { */
+  686:  /*       PULH */
+  687:  /*     } */
+  688:  /*     return; */
+  689:  /*   } */
+  690:  #endif
+  691:  
+  692:    /* Receive register full and no errors */
+  693:    if ((SCI1S1 & (mSCIxS1_RDRF_c | mSCIxS1_OR_c | mSCIxS1_NF_c | mSCIxS1_FE_c | mSCIxS1_PF_c)) == mSCIxS1_RDRF_c) 
+  000a b63c     [3]             LDA   60
+  000c a42f     [2]             AND   #47
+  000e a120     [2]             CMP   #32
+  0010 263f     [3]             BNE   L51 ;abs = 0051
+  694:    {
+  695:      maSci1RxBuf[mSci1RxBufLeadingIndex] = SCI1D;
+  0012 8c       [1]             CLRH  
+  0013 ce0000   [4]             LDX   mSci1RxBufLeadingIndex
+  0016 b63f     [3]             LDA   63
+  0018 d70000   [4]             STA   @maSci1RxBuf,X
+  696:  
+  697:      if (++mSci1RxBufLeadingIndex >= sizeof(maSci1RxBuf)) 
+  001b 450000   [3]             LDHX  @mSci1RxBufLeadingIndex
+  001e 7c       [4]             INC   ,X
+  001f c60000   [4]             LDA   mSci1RxBufLeadingIndex
+  0022 a120     [2]             CMP   #32
+  0024 2504     [3]             BCS   L2A ;abs = 002a
+  698:      {
+  699:        mSci1RxBufLeadingIndex = 0;
+  0026 4f       [1]             CLRA  
+  0027 c70000   [4]             STA   mSci1RxBufLeadingIndex
+  002a          L2A:    
+  700:      }
+  701:  
+  702:      if (mSci1RxBufferByteCount < sizeof(maSci1RxBuf)) 
+  002a c60000   [4]             LDA   mSci1RxBufferByteCount
+  002d a120     [2]             CMP   #32
+  002f 2406     [3]             BCC   L37 ;abs = 0037
+  703:      {
+  704:        ++mSci1RxBufferByteCount;
+  0031 450000   [3]             LDHX  @mSci1RxBufferByteCount
+  0034 7c       [4]             INC   ,X
+  705:      }
+  0035 200f     [3]             BRA   L46 ;abs = 0046
+  0037          L37:    
+  706:      else 
+  707:      {
+  708:        /* A new character was received while the buffer is already full. 
+  709:         * The oldest character in the buffer has been overwritten. 
+  710:         * The trailing index must be also incremented to compensate the overwritten characters
+  711:         */
+  712:         if(++mSci1RxBufTrailingIndex >= sizeof(maSci1RxBuf)) 
+  0037 450000   [3]             LDHX  @mSci1RxBufTrailingIndex
+  003a 7c       [4]             INC   ,X
+  003b c60000   [4]             LDA   mSci1RxBufTrailingIndex
+  003e a120     [2]             CMP   #32
+  0040 2504     [3]             BCS   L46 ;abs = 0046
+  713:         {
+  714:          mSci1RxBufTrailingIndex = 0;
+  0042 4f       [1]             CLRA  
+  0043 c70000   [4]             STA   mSci1RxBufTrailingIndex
+  0046          L46:    
+  715:         }
+  716:      }
+  717:      
+  718:  
+  719:  #if gUart1_EnableHWFlowControl_d
+  720:      if (sizeof(maSci1RxBuf) - mSci1RxBufferByteCount <= gUart_RxFlowControlSkew_d) 
+  721:      {
+  722:        Uart1_DisableFlow();
+  723:      }
+  724:  #endif
+  725:  
+  726:      /* Let the application know a byte has been received. */
+  727:      TS_SendEvent(gUartTaskId, gRxSci1Event_c);
+  0046 c60000   [4]             LDA   gUartTaskId
+  0049 ae01     [2]             LDX   #1
+  004b 8c       [1]             CLRH  
+  004c ac000000 [8]             CALL  TS_SendEvent
+  728:    }
+  0050 65       [3]             SKIP2 L53 ;abs = 0053
+  0051          L51:    
+  729:    else 
+  730:    {
+  731:      dummy = SCI1D;                      /* Clear the error. */
+  0051 b63f     [3]             LDA   63
+  0053          L53:    
+  732:    }
+  733:  
+  734:    __asm {
+  735:      PULH
+  0053 8a       [3]             PULH  
+  736:    }
+  737:  }                                       /* Uart1_RxIsr() */
+  0054 8a       [3]             PULH  
+  0055 80       [9]             RTI   
+  738:  #endif
+  739:  
+  740:  /**************************************/
+  741:  
+  742:  #if gUart2_Enabled_d
+  743:  INTERRUPT_KEYWORD void Uart2_RxIsr(void) {
+  744:    uint8_t dummy;
+  745:  
+  746:    /* The HCS08 does not save H on interrupt. */
+  747:    __asm {
+  748:      PSHH
+  749:    }
+  750:  
+  751:  #if gUart_Debug_d
+  752:    if (mSci2RxBufferByteCount > uart2RxBufHighWaterMark) {
+  753:      uart2RxBufHighWaterMark = mSci2RxBufferByteCount;
+  754:    }
+  755:  
+  756:  /*   if (mSci2RxBufferByteCount >= sizeof(maSci2RxBuf)) { */
+  757:  /*     /\* Out of room in the Rx buffer. *\/ */
+  758:  /*     while (mSci2RxBufferByteCount);    /\* assert(). *\/ */
+  759:  /*     __asm { */
+  760:  /*       PULH */
+  761:  /*     } */
+  762:  /*     return; */
+  763:  /*   } */
+  764:  #endif
+  765:  
+  766:    /* Receive register full and no errors */
+  767:    if ((SCI2S1 & (mSCIxS1_RDRF_c | mSCIxS1_OR_c | mSCIxS1_NF_c | mSCIxS1_FE_c | mSCIxS1_PF_c)) == mSCIxS1_RDRF_c) 
+  768:    {
+  769:      maSci2RxBuf[mSci2RxBufLeadingIndex] = SCI2D;
+  770:  
+  771:      if (++mSci2RxBufLeadingIndex >= sizeof(maSci2RxBuf)) 
+  772:      {
+  773:        mSci2RxBufLeadingIndex = 0;
+  774:      }
+  775:  
+  776:      if(mSci2RxBufferByteCount < sizeof(maSci2RxBuf)) 
+  777:      {
+  778:        ++mSci2RxBufferByteCount;
+  779:      }
+  780:      else 
+  781:      {
+  782:        /* A new character was received while the buffer is already full. 
+  783:         * The oldest character in the buffer has been overwritten. 
+  784:         * The trailing index must be also incremented to compensate the overwritten characters
+  785:         */
+  786:         if (++mSci2RxBufTrailingIndex >= sizeof(maSci2RxBuf)) 
+  787:         {
+  788:           mSci2RxBufTrailingIndex = 0;
+  789:         }
+  790:      }
+  791:      
+  792:  #if gUart2_EnableHWFlowControl_d
+  793:      if (sizeof(maSci2RxBuf) - mSci2RxBufferByteCount <= gUart_RxFlowControlSkew_d) {
+  794:        Uart2_DisableFlow();
+  795:      }
+  796:  #endif
+  797:  
+  798:      /* Let the application know a byte has been received. */
+  799:      TS_SendEvent(gUartTaskId, gRxSci2Event_c);
+  800:    }
+  801:    else {
+  802:      dummy = SCI2D;                      /* Clear the error. */
+  803:    }
+  804:  
+  805:    __asm {
+  806:      PULH
+  807:    }
+  808:  }                                       /* Uart2_RxIsr() */
+  809:  #endif
+  810:  
+  811:  /* Transmit ISR. */
+  812:  #if gUart1_Enabled_d
+  813:  INTERRUPT_KEYWORD void Uart1_TxIsr(void) {
+  0000 8b       [2]             PSHH  
+  0001 a7fd     [2]             AIS   #-3
+  814:    uint8_t dummy;
+  815:    void (*pfCallBack)(unsigned char const *pBuf);
+  816:  
+  817:    /* The HCS08 does not save H on interrupt. */
+  818:    __asm {
+  819:      PSHH
+  0003 8b       [2]             PSHH  
+  820:    }
+  821:  
+  822:    /* Write a byte. */
+  823:    dummy = SCI1S1;                       /* Required before write to data register. */
+  0004 b63c     [3]             LDA   60
+  824:    SCI1D = maSci1TxBufRefTable[mSci1TxBufRefTrailingIndex].pBuf[mSci1TxCurIndex];
+  0006 ce0000   [4]             LDX   mSci1TxBufRefTrailingIndex
+  0009 a605     [2]             LDA   #5
+  000b 42       [5]             MUL   
+  000c 87       [2]             PSHA  
+  000d c60000   [4]             LDA   mSci1TxCurIndex
+  0010 8c       [1]             CLRH  
+  0011 88       [3]             PULX  
+  0012 db0001   [4]             ADD   @maSci1TxBufRefTable:1,X
+  0015 87       [2]             PSHA  
+  0016 4f       [1]             CLRA  
+  0017 d90000   [4]             ADC   @maSci1TxBufRefTable,X
+  001a 87       [2]             PSHA  
+  001b 8a       [3]             PULH  
+  001c 88       [3]             PULX  
+  001d 7e3f     [5]             MOV   X+,63
+  825:  
+  826:    /* Finished with this buffer? */
+  827:    if (++mSci1TxCurIndex >= maSci1TxBufLenTable[mSci1TxBufRefTrailingIndex]) {
+  001f 450000   [3]             LDHX  @mSci1TxCurIndex
+  0022 7c       [4]             INC   ,X
+  0023 ce0000   [4]             LDX   mSci1TxBufRefTrailingIndex
+  0026 c60000   [4]             LDA   mSci1TxCurIndex
+  0029 8c       [1]             CLRH  
+  002a d10000   [4]             CMP   @maSci1TxBufLenTable,X
+  002d 2403     [3]             BCC   L32 ;abs = 0032
+  002f cc00c4   [4]             JMP   LC4 ;abs = 00c4
+  0032          L32:    
+  828:  
+  829:      /* Mark this one as done, and call the callback. */
+  830:      maSci1TxBufLenTable[mSci1TxBufRefTrailingIndex] = 0;
+  0032 4f       [1]             CLRA  
+  0033 d70000   [4]             STA   @maSci1TxBufLenTable,X
+  831:      pfCallBack = maSci1TxBufRefTable[mSci1TxBufRefTrailingIndex].pfCallBack;
+  0036 a605     [2]             LDA   #5
+  0038 42       [5]             MUL   
+  0039 97       [1]             TAX   
+  003a 9ebe0003 [6]             LDHX  @maSci1TxBufRefTable:3,X
+  003e 9eff03   [5]             STHX  3,SP
+  0041 8c       [1]             CLRH  
+  0042 97       [1]             TAX   
+  0043 de0002   [4]             LDX   @maSci1TxBufRefTable:2,X
+  0046 9eef02   [4]             STX   2,SP
+  832:      if (pfCallBack) {
+  0049 95       [2]             TSX   
+  004a af01     [2]             AIX   #1
+  004c cd0000   [6]             JSR   _CMP24_RC
+  004f 00               DC.B  0
+  0050 0000             DC.W  0
+  0052 274d     [3]             BEQ   LA1 ;abs = 00a1
+  833:        /*Signal uart task that we got a callback to be executed*/
+  834:        TS_SendEvent(gUartTaskId, gTxSci1Event_c);
+  0054 c60000   [4]             LDA   gUartTaskId
+  0057 ae04     [2]             LDX   #4
+  0059 8c       [1]             CLRH  
+  005a ac000000 [8]             CALL  TS_SendEvent
+  835:        /*add callback information to callback table*/
+  836:        maSci1TxCallbackTable[maSci1TxCallbackLeadingIndex].pfCallBack = pfCallBack;
+  005e c60000   [4]             LDA   maSci1TxCallbackLeadingIndex
+  0061 ae05     [2]             LDX   #5
+  0063 42       [5]             MUL   
+  0064 8c       [1]             CLRH  
+  0065 97       [1]             TAX   
+  0066 9ee604   [4]             LDA   4,SP
+  0069 d70004   [4]             STA   @maSci1TxCallbackTable:4,X
+  006c 9ee603   [4]             LDA   3,SP
+  006f d70003   [4]             STA   @maSci1TxCallbackTable:3,X
+  0072 9ee602   [4]             LDA   2,SP
+  0075 d70002   [4]             STA   @maSci1TxCallbackTable:2,X
+  837:        maSci1TxCallbackTable[maSci1TxCallbackLeadingIndex].pBuf = maSci1TxBufRefTable[mSci1TxBufRefTrailingIndex].pBuf;
+  0078 c60000   [4]             LDA   mSci1TxBufRefTrailingIndex
+  007b 89       [2]             PSHX  
+  007c ae05     [2]             LDX   #5
+  007e 42       [5]             MUL   
+  007f 97       [1]             TAX   
+  0080 9ebe0000 [6]             LDHX  @maSci1TxBufRefTable,X
+  0084 8b       [2]             PSHH  
+  0085 8c       [1]             CLRH  
+  0086 9f       [1]             TXA   
+  0087 9eee02   [4]             LDX   2,SP
+  008a d70001   [4]             STA   @maSci1TxCallbackTable:1,X
+  008d 86       [3]             PULA  
+  008e d70000   [4]             STA   @maSci1TxCallbackTable,X
+  838:        /*increment and wrap around leading index*/        
+  839:        if (++maSci1TxCallbackLeadingIndex >= NumberOfElements(maSci1TxBufRefTable)) {
+  0091 450000   [3]             LDHX  @maSci1TxCallbackLeadingIndex
+  0094 7c       [4]             INC   ,X
+  0095 c60000   [4]             LDA   maSci1TxCallbackLeadingIndex
+  0098 a103     [2]             CMP   #3
+  009a 8a       [3]             PULH  
+  009b 2504     [3]             BCS   LA1 ;abs = 00a1
+  840:          maSci1TxCallbackLeadingIndex = 0;
+  009d 4f       [1]             CLRA  
+  009e c70000   [4]             STA   maSci1TxCallbackLeadingIndex
+  00a1          LA1:    
+  841:        }
+  842:      
+  843:      }
+  844:      /*Set Tx Complete flag*/
+  845:      Uart1_TxCompleteFlag = TRUE;
+  00a1 a601     [2]             LDA   #1
+  00a3 c70000   [4]             STA   Uart1_TxCompleteFlag
+  846:  
+  847:      /* Increment to the next buffer. */
+  848:      mSci1TxCurIndex = 0;
+  00a6 4f       [1]             CLRA  
+  00a7 c70000   [4]             STA   mSci1TxCurIndex
+  849:      if (++mSci1TxBufRefTrailingIndex >= NumberOfElements(maSci1TxBufRefTable)) {
+  00aa 450000   [3]             LDHX  @mSci1TxBufRefTrailingIndex
+  00ad 7c       [4]             INC   ,X
+  00ae c60000   [4]             LDA   mSci1TxBufRefTrailingIndex
+  00b1 a103     [2]             CMP   #3
+  00b3 2504     [3]             BCS   LB9 ;abs = 00b9
+  850:        mSci1TxBufRefTrailingIndex = 0;
+  00b5 4f       [1]             CLRA  
+  00b6 c70000   [4]             STA   mSci1TxBufRefTrailingIndex
+  00b9          LB9:    
+  851:      }
+  852:  
+  853:      /* If there is no more data to send, turn off the transmit interrupt. */
+  854:      if (!maSci1TxBufLenTable[mSci1TxBufRefTrailingIndex]) {
+  00b9 ce0000   [4]             LDX   mSci1TxBufRefTrailingIndex
+  00bc 8c       [1]             CLRH  
+  00bd d60000   [4]             LDA   @maSci1TxBufLenTable,X
+  00c0 2602     [3]             BNE   LC4 ;abs = 00c4
+  855:        SCI1C2 &= ~mSCIxC2_TIE_c;
+  00c2 1f3b     [5]             BCLR  7,59
+  00c4          LC4:    
+  856:      }
+  857:    }
+  858:  
+  859:    __asm {
+  860:      PULH
+  00c4 8a       [3]             PULH  
+  861:    }
+  862:  }                                       /* Uart1_TxIsr() */
+  00c5 a703     [2]             AIS   #3
+  00c7 8a       [3]             PULH  
+  00c8 80       [9]             RTI   
+  863:  #endif
+  864:  
+  865:  /**************************************/
+  866:  
+  867:  #if gUart2_Enabled_d
+  868:  INTERRUPT_KEYWORD void Uart2_TxIsr(void) {
+  869:    uint8_t dummy;
+  870:    void (*pfCallBack)(unsigned char const *pBuf);
+  871:   
+  872:    /* The HCS08 does not save H on interrupt. */
+  873:    __asm {
+  874:      PSHH
+  875:    }
+  876:  
+  877:    /* Write a byte. */
+  878:    dummy = SCI2S1;                       /* Required before write to data register. */
+  879:    SCI2D = maSci2TxBufRefTable[mSci2TxBufRefTrailingIndex].pBuf[mSci2TxCurIndex];
+  880:  
+  881:    /* Finished with this buffer? */
+  882:    if (++mSci2TxCurIndex >= maSci2TxBufLenTable[mSci2TxBufRefTrailingIndex]) {
+  883:  
+  884:      /* Mark this one as done, and call the callback. */
+  885:      maSci2TxBufLenTable[mSci2TxBufRefTrailingIndex] = 0;
+  886:      pfCallBack = maSci2TxBufRefTable[mSci2TxBufRefTrailingIndex].pfCallBack;
+  887:  
+  888:      if (pfCallBack) {
+  889:        /*Signal uart task that we got a callback to be executed*/
+  890:        TS_SendEvent(gUartTaskId, gTxSci2Event_c);
+  891:        /*add callback information to callback table*/
+  892:        maSci2TxCallbackTable[maSci2TxCallbackLeadingIndex].pfCallBack = pfCallBack;
+  893:        maSci2TxCallbackTable[maSci2TxCallbackLeadingIndex].pBuf = maSci2TxBufRefTable[mSci2TxBufRefTrailingIndex].pBuf;
+  894:        /*increment and wrap around leading index*/     
+  895:        if (++maSci2TxCallbackLeadingIndex >= NumberOfElements(maSci2TxBufRefTable)) {
+  896:          maSci2TxCallbackLeadingIndex = 0;
+  897:        }
+  898:      
+  899:      }
+  900:      /*Set Tx Complete flag*/
+  901:      Uart2_TxCompleteFlag = TRUE;
+  902:      
+  903:      /* Increment to the next buffer. */
+  904:      mSci2TxCurIndex = 0;
+  905:      if (++mSci2TxBufRefTrailingIndex >= NumberOfElements(maSci2TxBufRefTable)) {
+  906:        mSci2TxBufRefTrailingIndex = 0;
+  907:      }
+  908:  
+  909:      /* If there is no more data to send, turn off the transmit interrupt. */
+  910:      if (!maSci2TxBufLenTable[mSci2TxBufRefTrailingIndex]) {
+  911:        SCI2C2 &= ~mSCIxC2_TIE_c;
+  912:      }
+  913:    }  
+  914:  
+  915:    __asm {
+  916:      PULH
+  917:    }
+  918:  }                                       /* Uart2_TxIsr() */
+  919:  #endif
+  920:  
+  921:  /*****************************************************************************/
+  922:  
+  923:  #endif /* gUart1_Enabled_d || gUart2_Enabled_d */
+  924:  #pragma CODE_SEG DEFAULT
+  925:  
+  926:  
+  927:  /* Initialize the uart task.*/
+  928:  void Uart_TaskInit(void)
+  929:  {
+  930:  #if gUart1_Enabled_d || gUart2_Enabled_d
+  931:    gUartTaskId = TS_CreateTask(gTsUartTaskPriority_c, Uart_Task);
+  0000 a603     [2]             LDA   #3
+  0002 87       [2]             PSHA  
+  0003 450000   [3]             LDHX  @Uart_Task
+  0006 89       [2]             PSHX  
+  0007 8b       [2]             PSHH  
+  0008 a600     [2]             LDA   @Uart_Task:PAGE
+  000a 87       [2]             PSHA  
+  000b ac000000 [8]             CALL  TS_CreateTask
+  000f a704     [2]             AIS   #4
+  0011 c70000   [4]             STA   gUartTaskId
+  932:  #endif
+  933:  }
+  0014 8d       [7]             RTC   
+  934:  
+  935:  /*****************************************************************************/
+  936:  

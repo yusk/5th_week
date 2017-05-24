@@ -1,0 +1,631 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /***********************************************************************************************\
+    2:  * Freescale MPL3115A2 Driver
+    3:   *
+    4:   * Filename: mma845x.c
+    5:   *
+    6:   *
+    7:   * (c) Copyright 2009, Freescale, Inc.  All rights reserved.
+    8:   *
+    9:   * No part of this document must be reproduced in any form - including copied,
+   10:   * transcribed, printed or by any electronic means - without specific written
+   11:   * permission from Freescale Semiconductor.
+   12:   *
+   13:   \***********************************************************************************************/
+   14:  #include "IIC_Interface.h"
+   15:  #include "IIC.h"
+   16:  #include "IoConfig.h"
+   17:  #include "IrqControlLib.h"
+   18:  #include "TS_Interface.h"
+   19:  #include "FunctionLib.h"
+   20:  #include "PublicConst.h"
+   21:  #include "MApp_init.h"
+   22:  #include "MPL3115A2.h"
+   23:  
+   24:  
+   25:  static tmrTimerID_t mMPL3115A2TimerID = gTmrInvalidTimerID_c;
+   26:  
+   27:  static dataFrom_MPL3115A2_t dataFrom_MPL3115A2 = 
+   28:  {                                                                
+   29:    0x00, 
+   30:    0x00, 
+   31:    0x00,
+   32:    0x00
+   33:  };
+   34:  
+   35:  extern uint8_t MPL3115A2_start_flag;
+   36:  
+   37:  
+   38:  /*********************************************************\
+   39:  * MPL3115A2_SetCallBack
+   40:  \*********************************************************/
+   41:  void MPL3115A2_SetCallBack(void (*pfCallBack)(void)) {
+   42:  	
+   43:  	pfMPL3115A2CallBack = pfCallBack;
+  0000 9efe05   [5]             LDHX  5,SP
+  0003 960001   [5]             STHX  pfMPL3115A2CallBack:1
+  0006 95       [2]             TSX   
+  0007 e603     [3]             LDA   3,X
+  0009 c70000   [4]             STA   pfMPL3115A2CallBack
+   44:  	  	  
+   45:  }
+  000c 8d       [7]             RTC   
+   46:  
+   47:  /*********************************************************\
+   48:  * Put MPL3115A2 into Active Mode
+   49:   \*********************************************************/
+   50:  void MPL3115A2_Active(void) {
+   51:  	uint8_t tmp_data;
+   52:  	
+   53:  	tmp_data = IIC_RegRead(MPL3115A2_SlaveAddressIIC, CTRL_REG1);
+  0000 aec0     [2]             LDX   #-64
+  0002 a626     [2]             LDA   #38
+  0004 ac000000 [8]             CALL  IIC_RegRead
+   54:  	tmp_data |= OST_MASK;
+  0008 aa02     [2]             ORA   #2
+   55:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG1,tmp_data);
+  000a aec0     [2]             LDX   #-64
+  000c 89       [2]             PSHX  
+  000d ae26     [2]             LDX   #38
+  000f ac000000 [8]             CALL  IIC_RegWrite
+  0013 8a       [3]             PULH  
+   56:  
+   57:  }
+  0014 8d       [7]             RTC   
+   58:  
+   59:  
+   60:  /*********************************************************\
+   61:  * void MPL3115A2_Init_Alt(void) 
+   62:   \*********************************************************/
+   63:  void MPL3115A2_Init_Alt(void) {
+   64:  
+   65:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG1,
+  0000 a6c0     [2]             LDA   #-64
+  0002 87       [2]             PSHA  
+  0003 ae26     [2]             LDX   #38
+  0005 a6b8     [2]             LDA   #-72
+  0007 ac000000 [8]             CALL  IIC_RegWrite
+  000b 8a       [3]             PULH  
+   66:  			(ALT_MASK | OS2_MASK | OS1_MASK | OS0_MASK));
+   67:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG2, CLEAR_CTRLREG2);
+  000c a6c0     [2]             LDA   #-64
+  000e 87       [2]             PSHA  
+  000f ae27     [2]             LDX   #39
+  0011 4f       [1]             CLRA  
+  0012 ac000000 [8]             CALL  IIC_RegWrite
+  0016 8a       [3]             PULH  
+   68:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG3, (PP_OD1_MASK | PP_OD2_MASK));
+  0017 a6c0     [2]             LDA   #-64
+  0019 87       [2]             PSHA  
+  001a ae28     [2]             LDX   #40
+  001c a611     [2]             LDA   #17
+  001e ac000000 [8]             CALL  IIC_RegWrite
+  0022 8a       [3]             PULH  
+   69:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG4, INT_EN_CLEAR);
+  0023 a6c0     [2]             LDA   #-64
+  0025 87       [2]             PSHA  
+  0026 ae29     [2]             LDX   #41
+  0028 4f       [1]             CLRA  
+  0029 ac000000 [8]             CALL  IIC_RegWrite
+  002d 8a       [3]             PULH  
+   70:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG5, INT_CFG_CLEAR);
+  002e a6c0     [2]             LDA   #-64
+  0030 87       [2]             PSHA  
+  0031 ae2a     [2]             LDX   #42
+  0033 4f       [1]             CLRA  
+  0034 ac000000 [8]             CALL  IIC_RegWrite
+  0038 8a       [3]             PULH  
+   71:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, PT_DATA_CFG_REG,
+  0039 a6c0     [2]             LDA   #-64
+  003b 87       [2]             PSHA  
+  003c ae13     [2]             LDX   #19
+  003e a607     [2]             LDA   #7
+  0040 ac000000 [8]             CALL  IIC_RegWrite
+  0044 8a       [3]             PULH  
+   72:  			(DREM_MASK | PDEFE_MASK | TDEFE_MASK));
+   73:  
+   74:  }
+  0045 8d       [7]             RTC   
+   75:  
+   76:  /*********************************************************\
+   77:  * void MPL3115A2_Init_Bar(void) 
+   78:   \*********************************************************/
+   79:  void MPL3115A2_Init_Bar(void) {
+   80:  	
+   81:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG1, 0x00);  //stand-by mode
+  0000 a6c0     [2]             LDA   #-64
+  0002 87       [2]             PSHA  
+  0003 ae26     [2]             LDX   #38
+  0005 4f       [1]             CLRA  
+  0006 ac000000 [8]             CALL  IIC_RegWrite
+  000a 8a       [3]             PULH  
+   82:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, PT_DATA_CFG_REG,(DREM_MASK | PDEFE_MASK | TDEFE_MASK));	
+  000b a6c0     [2]             LDA   #-64
+  000d 87       [2]             PSHA  
+  000e ae13     [2]             LDX   #19
+  0010 a607     [2]             LDA   #7
+  0012 ac000000 [8]             CALL  IIC_RegWrite
+  0016 8a       [3]             PULH  
+   83:  	IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG1, OSR_128); //Barometer_mode, OSC 512ms
+  0017 a6c0     [2]             LDA   #-64
+  0019 87       [2]             PSHA  
+  001a ae26     [2]             LDX   #38
+  001c a638     [2]             LDA   #56
+  001e ac000000 [8]             CALL  IIC_RegWrite
+  0022 8a       [3]             PULH  
+   84:  	MPL3115A2_Active();
+  0023 ac000000 [8]             CALL  MPL3115A2_Active
+   85:  	mMPL3115A2TimerID = TMR_AllocateTimer();
+  0027 ac000000 [8]             CALL  TMR_AllocateTimer
+  002b c70000   [4]             STA   mMPL3115A2TimerID
+   86:  
+   87:  }
+  002e 8d       [7]             RTC   
+   88:  
+   89:  /*********************************************************\
+   90:  * void MPL3115A2_Start_Periodical_data(void)
+   91:   \*********************************************************/
+   92:  void MPL3115A2_Start_Periodical_data(void) {
+   93:  	TMR_StartIntervalTimer(mMPL3115A2TimerID, mMPL3115A2Interval_c,MPL3115A2_Periodical_data);
+  0000 c60000   [4]             LDA   mMPL3115A2TimerID
+  0003 87       [2]             PSHA  
+  0004 4502bc   [3]             LDHX  #700
+  0007 89       [2]             PSHX  
+  0008 8b       [2]             PSHH  
+  0009 4f       [1]             CLRA  
+  000a 87       [2]             PSHA  
+  000b 87       [2]             PSHA  
+  000c 450000   [3]             LDHX  @MPL3115A2_Periodical_data
+  000f 89       [2]             PSHX  
+  0010 8b       [2]             PSHH  
+  0011 a600     [2]             LDA   @MPL3115A2_Periodical_data:PAGE
+  0013 87       [2]             PSHA  
+  0014 ac000000 [8]             CALL  TMR_StartIntervalTimer
+  0018 a708     [2]             AIS   #8
+   94:  }
+  001a 8d       [7]             RTC   
+   95:  
+   96:  /*********************************************************\
+   97:  * void MPL3115A2_Periodical_data(uint8_t timerId)
+   98:   \*********************************************************/
+   99:  void MPL3115A2_Periodical_data(uint8_t timerId) {
+  0000 a7f2     [2]             AIS   #-14
+  100:  
+  101:  	volatile int32_t Read_data_long = 0;
+  0002 5f       [1]             CLRX  
+  0003 8c       [1]             CLRH  
+  0004 9eff09   [5]             STHX  9,SP
+  0007 9eff07   [5]             STHX  7,SP
+  102:  	volatile uint8_t rxData[6];
+  103:  	int32_t tmp;
+  104:  	uint16_t wait_cnt =0;
+  105:  
+  106:  	
+  107:  	(void) timerId; /* prevent compiler warning */
+  108:  
+  109:  
+  110:      rxData[0] = IIC_RegRead(MPL3115A2_SlaveAddressIIC,STATUS_00_REG); // checking a STATUS-reg
+  000a aec0     [2]             LDX   #-64
+  000c 4f       [1]             CLRA  
+  000d ac000000 [8]             CALL  IIC_RegRead
+  0011 95       [2]             TSX   
+  0012 f7       [2]             STA   ,X
+  111:   
+  112:  
+  113:  	
+  114:  	if(  rxData[0] & 0x08  ){
+  0013 f6       [3]             LDA   ,X
+  0014 a508     [2]             BIT   #8
+  0016 2603     [3]             BNE   L1B ;abs = 001b
+  0018 cc00d8   [4]             JMP   LD8 ;abs = 00d8
+  001b          L1B:    
+  115:  		 
+  116:  		 pfMPL3115A2CallBack();  // Set event in order to notify application in callback function.
+  001b 320001   [5]             LDHX  pfMPL3115A2CallBack:1
+  001e c60000   [4]             LDA   pfMPL3115A2CallBack
+  0021 8b       [2]             PSHH  
+  0022 8b       [2]             PSHH  
+  0023 8b       [2]             PSHH  
+  0024 ac000000 [8]             CALL  _CALL_STAR08_FAR
+  117:  		 		 
+  118:  		IIC_RegReadN(MPL3115A2_SlaveAddressIIC,OUT_P_MSB_REG, OUT_T_LSB_REG, (uint8_t *)&rxData[1]); // Read data from $0x01 to 0x06
+  0028 a6c0     [2]             LDA   #-64
+  002a 87       [2]             PSHA  
+  002b a601     [2]             LDA   #1
+  002d 87       [2]             PSHA  
+  002e a605     [2]             LDA   #5
+  0030 95       [2]             TSX   
+  0031 af03     [2]             AIX   #3
+  0033 ac000000 [8]             CALL  IIC_RegReadN
+  0037 a702     [2]             AIS   #2
+  119:  
+  120:  		if (  rxData[0] & PDR_MASK  ) {		
+  0039 95       [2]             TSX   
+  003a f6       [3]             LDA   ,X
+  003b a504     [2]             BIT   #4
+  003d 2755     [3]             BEQ   L94 ;abs = 0094
+  121:  			  tmp = (int32_t)(rxData[1]);
+  003f e601     [3]             LDA   1,X
+  0041 5f       [1]             CLRX  
+  0042 87       [2]             PSHA  
+  0043 8c       [1]             CLRH  
+  0044 9eff0c   [5]             STHX  12,SP
+  0047 88       [3]             PULX  
+  0048 9eff0d   [5]             STHX  13,SP
+  122:  			  Read_data_long= tmp<<16;	  
+  004b 95       [2]             TSX   
+  004c af0a     [2]             AIX   #10
+  004e a610     [2]             LDA   #16
+  0050 cd0000   [6]             JSR   _LLSL
+  0053 affc     [2]             AIX   #-4
+  0055 cd0000   [6]             JSR   _POP32
+  123:  			  Read_data_long = Read_data_long + (int32_t)(rxData[2]<<8);
+  0058 95       [2]             TSX   
+  0059 e602     [3]             LDA   2,X
+  005b 97       [1]             TAX   
+  005c 4f       [1]             CLRA  
+  005d 87       [2]             PSHA  
+  005e cd0000   [6]             JSR   _SEXT16_32
+  0061 95       [2]             TSX   
+  0062 af0a     [2]             AIX   #10
+  0064 89       [2]             PSHX  
+  0065 8b       [2]             PSHH  
+  0066 aff6     [2]             AIX   #-10
+  0068 cd0000   [6]             JSR   _LADD
+  006b af0a     [2]             AIX   #10
+  006d cd0000   [6]             JSR   _POP32
+  124:  			  dataFrom_MPL3115A2.Pressure_data=  ( Read_data_long + (int32_t)rxData[3] ) >>4;
+  0070 95       [2]             TSX   
+  0071 e607     [3]             LDA   7,X
+  0073 5f       [1]             CLRX  
+  0074 87       [2]             PSHA  
+  0075 4f       [1]             CLRA  
+  0076 87       [2]             PSHA  
+  0077 89       [2]             PSHX  
+  0078 87       [2]             PSHA  
+  0079 95       [2]             TSX   
+  007a 89       [2]             PSHX  
+  007b 8b       [2]             PSHH  
+  007c af0e     [2]             AIX   #14
+  007e 89       [2]             PSHX  
+  007f 8b       [2]             PSHH  
+  0080 9efe03   [5]             LDHX  3,SP
+  0083 cd0000   [6]             JSR   _LADD
+  0086 a604     [2]             LDA   #4
+  0088 95       [2]             TSX   
+  0089 cd0000   [6]             JSR   _LASR
+  008c 450000   [3]             LDHX  @dataFrom_MPL3115A2
+  008f cd0000   [6]             JSR   _POP32
+  0092 a70e     [2]             AIS   #14
+  0094          L94:    
+  125:  		}
+  126:  
+  127:  		if (   rxData[0] & TDR_MASK  ) {		
+  0094 95       [2]             TSX   
+  0095 f6       [3]             LDA   ,X
+  0096 a502     [2]             BIT   #2
+  0098 2732     [3]             BEQ   LCC ;abs = 00cc
+  128:  			  Read_data_long = (int32_t)(rxData[4]<<8);
+  009a e604     [3]             LDA   4,X
+  009c 87       [2]             PSHA  
+  009d 4f       [1]             CLRA  
+  009e 88       [3]             PULX  
+  009f 87       [2]             PSHA  
+  00a0 cd0000   [6]             JSR   _SEXT16_32
+  00a3 95       [2]             TSX   
+  00a4 af0a     [2]             AIX   #10
+  00a6 cd0000   [6]             JSR   _POP32
+  129:  			  dataFrom_MPL3115A2.Temparature_data=  ( Read_data_long + (int32_t)rxData[5] ) >>4;		
+  00a9 95       [2]             TSX   
+  00aa e605     [3]             LDA   5,X
+  00ac 5f       [1]             CLRX  
+  00ad 87       [2]             PSHA  
+  00ae 89       [2]             PSHX  
+  00af 89       [2]             PSHX  
+  00b0 89       [2]             PSHX  
+  00b1 95       [2]             TSX   
+  00b2 89       [2]             PSHX  
+  00b3 8b       [2]             PSHH  
+  00b4 af0a     [2]             AIX   #10
+  00b6 89       [2]             PSHX  
+  00b7 8b       [2]             PSHH  
+  00b8 9efe03   [5]             LDHX  3,SP
+  00bb cd0000   [6]             JSR   _LADD
+  00be a604     [2]             LDA   #4
+  00c0 95       [2]             TSX   
+  00c1 cd0000   [6]             JSR   _LASR
+  00c4 450004   [3]             LDHX  @dataFrom_MPL3115A2:4
+  00c7 cd0000   [6]             JSR   _POP32
+  00ca a70a     [2]             AIS   #10
+  00cc          LCC:    
+  130:  		}	
+  131:  		
+  132:  		IIC_RegWrite(MPL3115A2_SlaveAddressIIC, CTRL_REG1, (OSR_128|OST_MASK));  
+  00cc a6c0     [2]             LDA   #-64
+  00ce 87       [2]             PSHA  
+  00cf ae26     [2]             LDX   #38
+  00d1 a63a     [2]             LDA   #58
+  00d3 ac000000 [8]             CALL  IIC_RegWrite
+  00d7 8a       [3]             PULH  
+  00d8          LD8:    
+  133:  	
+  134:  	
+  135:  	}
+  136:  
+  137:  	
+  138:  }
+  00d8 a70e     [2]             AIS   #14
+  00da 8d       [7]             RTC   
+  139:  
+  140:  /*********************************************************\
+  141:  * uint32_t MPL3115A2_CatchSensorData(uint8_t number)
+  142:  \*********************************************************/
+  143:  uint32_t MPL3115A2_CatchSensorData(uint8_t number){
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 a7fc     [2]             AIS   #-4
+  144:  	
+  145:  	volatile uint32_t catch_data;
+  146:  	
+  147:  	switch(number){
+  0004 410106   [4]             CBEQA #1,LD ;abs = 000d
+  0007 a102     [2]             CMP   #2
+  0009 2619     [3]             BNE   L24 ;abs = 0024
+  000b 200b     [3]             BRA   L18 ;abs = 0018
+  000d          LD:     
+  148:  		case 1:
+  149:  			catch_data = dataFrom_MPL3115A2.Pressure_data;
+  000d 320002   [5]             LDHX  dataFrom_MPL3115A2:2
+  0010 9eff03   [5]             STHX  3,SP
+  0013 320000   [5]             LDHX  dataFrom_MPL3115A2
+  150:  		break;
+  0016 2009     [3]             BRA   L21 ;abs = 0021
+  0018          L18:    
+  151:  		case 2:
+  152:  			catch_data = dataFrom_MPL3115A2.Temparature_data;
+  0018 320006   [5]             LDHX  dataFrom_MPL3115A2:6
+  001b 9eff03   [5]             STHX  3,SP
+  001e 320004   [5]             LDHX  dataFrom_MPL3115A2:4
+  0021          L21:    
+  0021 9eff01   [5]             STHX  1,SP
+  0024          L24:    
+  153:  		break;
+  154:  		default :
+  155:  		break;
+  156:  	}
+  157:  	
+  158:      return catch_data;
+  0024 9efe05   [5]             LDHX  5,SP
+  0027 89       [2]             PSHX  
+  0028 8b       [2]             PSHH  
+  0029 95       [2]             TSX   
+  002a af02     [2]             AIX   #2
+  002c a604     [2]             LDA   #4
+  002e cd0000   [6]             JSR   _COPY
+  159:      
+  160:  }
+  0031 a706     [2]             AIS   #6
+  0033 8d       [7]             RTC   
+  161:  
+  162:  /*********************************************************\
+  163:  * void MPL3115A2_PrintALT(void) 
+  164:  \*********************************************************/
+  165:  void MPL3115A2_PrintALT(void){
+  166:  
+  167:  	volatile static uint8_t read_data;
+  168:  
+  169:  	UartUtil_Print(" MPL_PrintALT\n\r", gAllowToBlock_d);
+  0000 450000   [3]             LDHX  @" MPL_PrintALT\012\015"
+  0003 a601     [2]             LDA   #1
+  0005 ac000000 [8]             CALL  UartUtil_Print
+  170:  	read_data = IIC_RegRead(MPL3115A2_SlaveAddressIIC, OUT_P_MSB_REG);
+  0009 aec0     [2]             LDX   #-64
+  000b a601     [2]             LDA   #1
+  000d ac000030 [8]             CALL  MPL3115A2_PrintALT:48
+  171:  	UartUtil_PrintHex((void *) &read_data, 1, FALSE);
+  0011 450000   [3]             LDHX  @read_data
+  0014 89       [2]             PSHX  
+  0015 8b       [2]             PSHH  
+  0016 ae01     [2]             LDX   #1
+  0018 4f       [1]             CLRA  
+  0019 ac000000 [8]             CALL  UartUtil_PrintHex
+  001d a702     [2]             AIS   #2
+  172:  	read_data = IIC_RegRead(MPL3115A2_SlaveAddressIIC, OUT_P_CSB_REG);
+  001f aec0     [2]             LDX   #-64
+  0021 a602     [2]             LDA   #2
+  0023 ac000030 [8]             CALL  MPL3115A2_PrintALT:48
+  173:  	read_data = IIC_RegRead(MPL3115A2_SlaveAddressIIC, OUT_P_LSB_REG);
+  0027 aec0     [2]             LDX   #-64
+  0029 a603     [2]             LDA   #3
+  002b ac000030 [8]             CALL  MPL3115A2_PrintALT:48
+  174:  }
+  002f 8d       [7]             RTC   
+  0030          L30:    
+  0030 ac000000 [8]             CALL  IIC_RegRead
+  0034 c70000   [4]             STA   read_data
+  0037 8d       [7]             RTC   
+  175:  
+  176:  /*********************************************************\
+  177:  * void MPL3115A2_PrintTEMP(void) 
+  178:  \*********************************************************/
+  179:  void MPL3115A2_PrintTEMP(void) {
+  180:  	volatile static uint8_t read_data;
+  181:  
+  182:  	read_data = IIC_RegRead(MPL3115A2_SlaveAddressIIC, OUT_T_MSB_REG);
+  0000 aec0     [2]             LDX   #-64
+  0002 a604     [2]             LDA   #4
+  0004 ac000000 [8]             CALL  IIC_RegRead
+  0008 c70000   [4]             STA   read_data
+  183:  	read_data = IIC_RegRead(MPL3115A2_SlaveAddressIIC, OUT_T_LSB_REG);
+  000b aec0     [2]             LDX   #-64
+  000d a605     [2]             LDA   #5
+  000f ac000000 [8]             CALL  IIC_RegRead
+  0013 c70000   [4]             STA   read_data
+  184:  }
+  0016 8d       [7]             RTC   
+  185:  
+  186:  /*********************************************************\
+  187:  * void MPL3115A2_Init(void)
+  188:  \*********************************************************/
+  189:  void MPL3115A2_Init(void){
+  190:  	MPL3115A2_SetCallBack(MPL3115A2_CallBack);  
+  0000 450000   [3]             LDHX  @MPL3115A2_CallBack
+  0003 89       [2]             PSHX  
+  0004 8b       [2]             PSHH  
+  0005 a600     [2]             LDA   @MPL3115A2_CallBack:PAGE
+  0007 87       [2]             PSHA  
+  0008 ac000000 [8]             CALL  MPL3115A2_SetCallBack
+  000c a703     [2]             AIS   #3
+  191:  	MPL3115A2_Init_Bar();
+  000e ac000000 [8]             CALL  MPL3115A2_Init_Bar
+  192:  	MPL3115A2_start_flag = 1;
+  0012 a601     [2]             LDA   #1
+  0014 c70000   [4]             STA   MPL3115A2_start_flag
+  193:  }
+  0017 8d       [7]             RTC   
+  194:  
+  195:  /*********************************************************\
+  196:  * void MPL3115A2_CallBack(void) 
+  197:  \*********************************************************/
+  198:  void MPL3115A2_CallBack(void){	
+  199:  	TS_SendEvent(gAppTaskID_c, gAppEvt_FromMPL3115A2_c);	
+  0000 c60000   [4]             LDA   gAppTaskID_c
+  0003 ae80     [2]             LDX   #-128
+  0005 8c       [1]             CLRH  
+  0006 ac000000 [8]             CALL  TS_SendEvent
+  200:  }
+  000a 8d       [7]             RTC   
+  201:  
+  202:  /*********************************************************\
+  203:  * void MPL3115A2_dump(event_t events) 
+  204:  \*********************************************************/
+  205:  void MPL3115A2_dump(event_t events){
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 a7f4     [2]             AIS   #-12
+  206:  
+  207:  	volatile int32_t tmp;
+  208:  	volatile uint32_t tmp_unsigned;
+  209:  	
+  210:   //-----------------------------------------------------     
+  211:  	// Start to receive periodical data 
+  212:  	if(MPL3115A2_start_flag){
+  0004 c60000   [4]             LDA   MPL3115A2_start_flag
+  0007 2708     [3]             BEQ   L11 ;abs = 0011
+  213:  		MPL3115A2_start_flag = 0;
+  0009 4f       [1]             CLRA  
+  000a c70000   [4]             STA   MPL3115A2_start_flag
+  214:  		MPL3115A2_Start_Periodical_data();
+  000d ac000000 [8]             CALL  MPL3115A2_Start_Periodical_data
+  0011          L11:    
+  215:  	}
+  216:  	
+  217:  	if (events & gAppEvt_FromMPL3115A2_c)
+  0011 95       [2]             TSX   
+  0012 e60d     [3]             LDA   13,X
+  0014 2a76     [3]             BPL   L8C ;abs = 008c
+  218:  	{   
+  219:  		UartUtil_Print("\n\r-----------------------------------------------\n\r", gAllowToBlock_d); 
+  0016 450000   [3]             LDHX  @"\012\015-----------------------------------------------\012\015"
+  0019 ac00008f [8]             CALL  MPL3115A2_dump:143
+  220:  		UartUtil_Print("MPL3115A2(P: Int18,Float2, T: Int8, Float4)  \n\rPress  : 0x", gAllowToBlock_d);  
+  001d 450000   [3]             LDHX  @"MPL3115A2(P: Int18,Float2, T: Int8, Float4)  \012\015Press  : 0x"
+  0020 ac00008f [8]             CALL  MPL3115A2_dump:143
+  221:  		tmp = MPL3115A2_CatchSensorData(1);
+  0024 95       [2]             TSX   
+  0025 af04     [2]             AIX   #4
+  0027 a601     [2]             LDA   #1
+  0029 ac000000 [8]             CALL  MPL3115A2_CatchSensorData
+  002d 9efe07   [5]             LDHX  7,SP
+  0030 9eff03   [5]             STHX  3,SP
+  0033 9efe05   [5]             LDHX  5,SP
+  0036 9eff01   [5]             STHX  1,SP
+  222:  
+  223:  		tmp_unsigned = (uint32_t)tmp;	
+  0039 9efe03   [5]             LDHX  3,SP
+  003c 9eff0b   [5]             STHX  11,SP
+  003f 9efe01   [5]             LDHX  1,SP
+  0042 9eff09   [5]             STHX  9,SP
+  224:  		UartUtil_PrintHex((uint8_t *)&tmp_unsigned, 4, 1);  	
+  0045 95       [2]             TSX   
+  0046 ac000096 [8]             CALL  MPL3115A2_dump:150
+  225:  		
+  226:  #if 0		
+  227:  		tmp_integer = tmp>>2;     // Integer bit
+  228:  		tmp_float   = tmp & 0x03; // float bit
+  229:  		
+  230:  		UartUtil_PrintDec(tmp_integer, 4, 0);		
+  231:  		UartUtil_Print(".", gAllowToBlock_d);	
+  232:  		UartUtil_PrintDec(tmp_float, 4, 0);		
+  233:  #endif		
+  234:  		UartUtil_Print(" /4  [Pa]", gAllowToBlock_d);			
+  004a 450000   [3]             LDHX  @" /4  [Pa]"
+  004d ac00008f [8]             CALL  MPL3115A2_dump:143
+  235:  		
+  236:  		tmp = MPL3115A2_CatchSensorData(2);
+  0051 95       [2]             TSX   
+  0052 af04     [2]             AIX   #4
+  0054 a602     [2]             LDA   #2
+  0056 ac000000 [8]             CALL  MPL3115A2_CatchSensorData
+  005a 9efe07   [5]             LDHX  7,SP
+  005d 9eff03   [5]             STHX  3,SP
+  0060 9efe05   [5]             LDHX  5,SP
+  0063 9eff01   [5]             STHX  1,SP
+  237:  #if 0	
+  238:  		tmp_integer = tmp>>4;     // Integer bit
+  239:  		tmp_float   = tmp & 0x0F; // float bit
+  240:  		UartUtil_PrintDec(tmp_integer, 4, 0);
+  241:  		UartUtil_Print(".", gAllowToBlock_d);
+  242:  		UartUtil_PrintDec(tmp_float, 4, 0);	
+  243:  #endif		
+  244:  		
+  245:  		UartUtil_Print("\n\rTemp   : 0x", gAllowToBlock_d);  	
+  0066 450000   [3]             LDHX  @"\012\015Temp   : 0x"
+  0069 ac00008f [8]             CALL  MPL3115A2_dump:143
+  246:  		tmp_unsigned = (uint32_t)tmp;	
+  006d 9efe03   [5]             LDHX  3,SP
+  0070 9eff0b   [5]             STHX  11,SP
+  0073 9efe01   [5]             LDHX  1,SP
+  0076 9eff09   [5]             STHX  9,SP
+  247:  		UartUtil_PrintHex((uint8_t *)&tmp_unsigned, 4, 1);  			
+  0079 95       [2]             TSX   
+  007a ac000096 [8]             CALL  MPL3115A2_dump:150
+  248:  		UartUtil_Print(" /16 [C]", gAllowToBlock_d);
+  007e 450000   [3]             LDHX  @" /16 [C]"
+  0081 ac00008f [8]             CALL  MPL3115A2_dump:143
+  249:  		UartUtil_Print("\n\r-----------------------------------------------\n\r", gAllowToBlock_d); 
+  0085 450000   [3]             LDHX  @"\012\015-----------------------------------------------\012\015"
+  0088 ac00008f [8]             CALL  MPL3115A2_dump:143
+  008c          L8C:    
+  250:  		
+  251:  		
+  252:  	} 
+  253:  	
+  254:  	
+  255:  
+  256:  	
+  257:  }
+  008c a70e     [2]             AIS   #14
+  008e 8d       [7]             RTC   
+  008f          L8F:    
+  008f a601     [2]             LDA   #1
+  0091 ac000000 [8]             CALL  UartUtil_Print
+  0095 8d       [7]             RTC   
+  0096          L96:    
+  0096 af08     [2]             AIX   #8
+  0098 89       [2]             PSHX  
+  0099 8b       [2]             PSHH  
+  009a ae04     [2]             LDX   #4
+  009c a601     [2]             LDA   #1
+  009e ac000000 [8]             CALL  UartUtil_PrintHex
+  00a2 a702     [2]             AIS   #2
+  00a4 8d       [7]             RTC   
+  258:  
+  259:  
+  260:  /******************************************************
+  261:   * *****************************************\
+  262:  * Private functions
+  263:   \***********************************************************************************************/
+  264:  

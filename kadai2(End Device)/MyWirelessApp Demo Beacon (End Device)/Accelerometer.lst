@@ -1,0 +1,832 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * Source file for accelerometer driver.
+    3:  *
+    4:  * (c) Copyright 2008, Freescale, Inc. All rights reserved.
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from Freescale Semiconductor.
+   10:  *
+   11:  *****************************************************************************/
+   12:  
+   13:  #include "TMR_Interface.h"
+   14:  #include "EmbeddedTypes.h"
+   15:  #include "PortConfig.h"
+   16:  #include "Accelerometer.h"
+   17:  #include "ACC_Interface.h"
+   18:  #include "IIC.h"
+   19:  #include "IIC_Interface.h"
+   20:  #include "TS_Interface.h"
+   21:  #include "FunctionLib.h"
+   22:  
+   23:  #ifndef gRF4CEIncluded_d
+   24:  #define gRF4CEIncluded_d 0
+   25:  #endif
+   26:  
+   27:  #if gRF4CEIncluded_d
+   28:    #include "NwkGlobals.h"
+   29:  #endif
+   30:  
+   31:  
+   32:  #if (gAccelerometerSupported_d == TRUE)
+   33:  
+   34:  /*****************************************************************************
+   35:  ******************************************************************************
+   36:  * Private macros
+   37:  ******************************************************************************
+   38:  *****************************************************************************/
+   39:  
+   40:  /*****************************************************************************
+   41:  ******************************************************************************
+   42:  * Private type definitions
+   43:  ******************************************************************************
+   44:  *****************************************************************************/
+   45:  
+   46:  /*****************************************************************************
+   47:  ******************************************************************************
+   48:  * Public memory definitions
+   49:  ******************************************************************************
+   50:  *****************************************************************************/
+   51:  
+   52:  
+   53:  /*****************************************************************************
+   54:  ******************************************************************************
+   55:  * Private memory definitions
+   56:  ******************************************************************************
+   57:  *****************************************************************************/
+   58:  /* Pointer to the acc callback registered by the application */
+   59:  static ACCFunction_t mpfKeyFunction;
+   60:  
+   61:  /* Variable storing the ID of the acc task */
+   62:  static tsTaskID_t    mAccTaskID_c;
+   63:  
+   64:  /* Variable storing information that should be sent to acc over I2C
+   65:  This is kept globally, as it should not be altered while the I2C is
+   66:  performing the write operation, on its own task */
+   67:  static dataToAcc_t   mDataToAcc;
+   68:  
+   69:  /* Variable storing information that is read from acc over I2C
+   70:  This is kept globally, as the I2C is performing the read operation 
+   71:  on its own task */
+   72:  static dataFromAcc_t mDataFromAcc;
+   73:  
+   74:  /* Extra variable that is needed in the SetSamplesPerSecond state */
+   75:  static uint8_t       mDataToAccMask;
+   76:  
+   77:  /* State machine of the accelerometer */
+   78:  static accStateMachine_t mAccStateMachine =
+   79:  {                                                                
+   80:    gAccState_Idle_c, /*  accState_t        state;                  */
+   81:    0x00,             /*  uint8_t           substate;               */
+   82:    FALSE,            /*  bool_t            bAppRequestInProcess;   */
+   83:    0x00,             /*  appToAccReqType_t appToAccReqType;        */
+   84:    0x00              /*  event_t           eventsForIdleState;     */
+   85:  };
+   86:  
+   87:  
+   88:  
+   89:  /*****************************************************************************
+   90:  ******************************************************************************
+   91:  * Private prototypes
+   92:  ******************************************************************************
+   93:  *****************************************************************************/
+   94:  /* Handlers for the states of the accelerometer */
+   95:  static void ACC_HandleStateIdle                 (event_t events);
+   96:  static void ACC_HandleStateSetEvents            (event_t events);
+   97:  static void ACC_HandleStateSetPowerMode         (event_t events);
+   98:  static void ACC_HandleStateSetSamplesPerSecond  (event_t events);
+   99:  static void ACC_HandleStateSetTapDetection      (event_t events);
+  100:  static void ACC_HandleStateSetTapDebounceCounter(event_t events);
+  101:  static void ACC_HandleStateGetEvents            (event_t events);
+  102:  
+  103:  /* Other private services */
+  104:  static bool_t ACC_InitAppRequest(void);
+  105:  static void   ACC_SendCnfEventToApp(accEventType_t accEventType, bool_t status);
+  106:  static void   ACC_SendIndEventToApp(accEvent_t accEventType);
+  107:  static void   ACC_IICOperationComplete(uint8_t status);
+  108:  
+  109:  /*****************************************************************************
+  110:  ******************************************************************************
+  111:  * Public functions
+  112:  ******************************************************************************
+  113:  *****************************************************************************/
+  114:  
+  115:  /*****************************************************************************
+  116:  * AccTask
+  117:  *
+  118:  * Accelerometer task implements various states for accelerometer functionality
+  119:  ******************************************************************************/
+  120:  
+  121:  void AccTask(event_t events) 
+  122:  { 
+  123:    /*  As only one event is processed at a time, make sure we don't loose the others, in case they
+  124:    come in the same time */
+  125:    mAccStateMachine.eventsForIdleState |= (events & gAccEvent_MaskEventsForIdleState_c); 
+  126:  
+  127:     
+  128:    switch(mAccStateMachine.state)
+  129:    {
+  130:      case gAccState_Idle_c:
+  131:        ACC_HandleStateIdle(events);
+  132:        break;
+  133:        
+  134:      case gAccState_GetEvents_c:
+  135:        ACC_HandleStateGetEvents(events);
+  136:        break;
+  137:        
+  138:      case gAccState_SetEvents_c:
+  139:        ACC_HandleStateSetEvents(events);
+  140:        break;
+  141:        
+  142:      case gAccState_SetPowerMode_c:
+  143:        ACC_HandleStateSetPowerMode(events);
+  144:        break;
+  145:      
+  146:      case gAccState_SetSamplesPerSecond_c:
+  147:        ACC_HandleStateSetSamplesPerSecond(events);
+  148:        break;
+  149:        
+  150:      case gAccState_SetTapPulseDetection_c:
+  151:        ACC_HandleStateSetTapDetection(events);
+  152:        break;
+  153:      
+  154:      case gAccState_SetTapPulseDebounceCounter_c:
+  155:        ACC_HandleStateSetTapDebounceCounter(events);  
+  156:        break;
+  157:    }
+  158:  
+  159:    /* If there still are events for idle state, keep the task running */ 
+  160:    if(mAccStateMachine.eventsForIdleState) 
+  161:    {
+  162:      TS_SendEvent(mAccTaskID_c, mAccStateMachine.eventsForIdleState); 
+  163:    }
+  164:  }
+  165:  #endif /* gAccelerometerSupported_d */ 
+  166:  
+  167:  
+  168:  /*****************************************************************************
+  169:  * ACC_Init
+  170:  *
+  171:  * Initiliaze accelerometer module
+  172:  ******************************************************************************/
+  173:  
+  174:  bool_t ACC_Init(ACCFunction_t pfCallBackAdr)
+  175:  {
+  176:  #if (gAccelerometerSupported_d == TRUE)
+  177:    uint8_t retStatus = FALSE;
+  178:    
+  179:    /* Check if callback is not null */
+  180:    if(pfCallBackAdr)
+  181:    {
+  182:      /* Make ACC interrupt pin input  */
+  183:      ACC_IRQ_SetPinInput(); 
+  184:      /* where to send the data and events */
+  185:      mpfKeyFunction = pfCallBackAdr;
+  186:      /* Create acceleromter task */
+  187:      mAccTaskID_c = TS_CreateTask(gTsAccTaskPriority_c, AccTask);
+  188:      if (mAccTaskID_c != gTsInvalidTaskID_c)
+  189:      {
+  190:        retStatus = TRUE;
+  191:        /* Intialize interrupt pin */
+  192:        IRQSC = gIrqscIntEnable_c | gIrqscPinEnable_c | gIrqscEdgeSelect_c;
+  193:      }
+  194:    }
+  195:    return retStatus;
+  196:  #else
+  197:    (void)pfCallBackAdr;
+  198:    return TRUE;
+  0000 a601     [2]             LDA   #1
+  199:  #endif /* gAccelerometerSupported_d */
+  200:  }
+  0002 8d       [7]             RTC   
+  201:  
+  202:  /*****************************************************************************
+  203:  * ACC_Uninit
+  204:  * 
+  205:  * Uninit the accelerometer module, destroy task
+  206:  *****************************************************************************/
+  207:  void ACC_Uninit(void)
+  208:  {
+  209:  #if (gAccelerometerSupported_d == TRUE)
+  210:     
+  211:    /* Destroy the ACC task if there is a valid ID */
+  212:    if(gTsInvalidTaskID_c != mAccTaskID_c)
+  213:    {
+  214:      TS_DestroyTask(mAccTaskID_c);  
+  215:    }
+  216:    
+  217:  #endif /* gAccelerometerSupported_d */
+  218:  }
+  0000 8d       [7]             RTC   
+  219:  
+  220:  /*****************************************************************************
+  221:  * ACC_SetEvents
+  222:  *
+  223:  * Set events function -- used to setup the interrupt register
+  224:  ******************************************************************************/
+  225:  
+  226:  bool_t ACC_SetEvents(uint16_t accMaskEvents)
+  227:  {
+  228:  #if (gAccelerometerSupported_d == TRUE)  
+  229:    if(ACC_InitAppRequest() == FALSE)
+  230:      return FALSE;
+  231:  
+  232:    /* Store information needed for when the acc task will get the chance to run
+  233:    and to start processing this request */
+  234:    mAccStateMachine.appToAccReqType = gAppToAccReqType_SetEvents_c;
+  235:    
+  236:    mDataToAcc.regAddress = ACC_INT_SETUP_REG;
+  237:    mDataToAcc.data       = (uint8_t)(accMaskEvents >> 1);
+  238:  #else
+  239:    (void)accMaskEvents;
+  240:  #endif /* gAccelerometerSupported_d */
+  241:    
+  242:    return TRUE;
+  0000 a601     [2]             LDA   #1
+  243:  }
+  0002 8d       [7]             RTC   
+  244:  
+  245:                           
+  246:  /*****************************************************************************
+  247:  * ACC_SetPowerMode
+  248:  *
+  249:  * Set power mode
+  250:  ******************************************************************************/
+  251:  
+  252:  bool_t ACC_SetPowerMode(gAccPowerMode_t accPowerMode)
+  253:  {
+  254:  #if (gAccelerometerSupported_d == TRUE) 
+  255:    if(ACC_InitAppRequest() == FALSE)
+  256:      return FALSE;
+  257:    
+  258:    /* Store information needed for when the acc task will get the chance to run
+  259:    and to start processing this request */
+  260:    mAccStateMachine.appToAccReqType = gAppToAccReqType_SetPowerMode_c;
+  261:  
+  262:    mDataToAcc.regAddress = ACC_MODE_REG;        
+  263:    mDataToAcc.data       = accPowerMode;
+  264:  #else
+  265:    (void)accPowerMode;
+  266:  #endif /* gAccelerometerSupported_d */
+  267:     
+  268:    return TRUE;
+  0000 a601     [2]             LDA   #1
+  269:  }
+  0002 8d       [7]             RTC   
+  270:  
+  271:  
+  272:  
+  273:  /*****************************************************************************
+  274:  * ACC_SetSamplesPerSecond
+  275:  *
+  276:  * Set samples per seconds
+  277:  ******************************************************************************/
+  278:  
+  279:  bool_t ACC_SetSamplesPerSecond(gAccSamplesPerSecondSetup_t accSamplesPerSecond)
+  280:  {
+  281:  #if (gAccelerometerSupported_d == TRUE)
+  282:    if(ACC_InitAppRequest() == FALSE)
+  283:      return FALSE;
+  284:    
+  285:    /* Store information needed for when the acc task will get the chance to run
+  286:    and to start processing this request */
+  287:    mAccStateMachine.appToAccReqType = gAppToAccReqType_SetSamplesPerSecond_c;
+  288:  
+  289:    mDataToAcc.regAddress = ACC_SR_REG;
+  290:    switch(accSamplesPerSecond.sampleRegisterSelect)
+  291:    {    
+  292:      case gAccSampleRegisterAM_c:
+  293:        mDataToAcc.data = ~gSrAmsrMask_c  & (accSamplesPerSecond.sampleRegister.activeAutoSleepSampleRate);       
+  294:        mDataToAccMask  = gSrAmsrMask_c;       
+  295:        break;
+  296:      
+  297:      case gAccSampleRegisterAW_c:
+  298:        mDataToAcc.data = ~gSrAwsrMask_c  & (accSamplesPerSecond.sampleRegister.autoWakeSampleRate << gSrAwsrPos_c);             
+  299:        mDataToAccMask  = gSrAwsrMask_c;       
+  300:        break;
+  301:      
+  302:      case gAccSampleRegisterTilt_c:            
+  303:        mDataToAcc.data = ~gSrFiltMask_c  & (accSamplesPerSecond.sampleRegister.tiltSamplesBeforeGen << gSrFiltPos_c);                       
+  304:        mDataToAccMask  = gSrFiltMask_c;       
+  305:        break;
+  306:    }
+  307:  #else
+  308:    (void)accSamplesPerSecond;
+  309:  #endif /* gAccelerometerSupported_d */
+  310:    
+  311:    return TRUE;
+  0000 a601     [2]             LDA   #1
+  312:  }
+  0002 8d       [7]             RTC   
+  313:  
+  314:  
+  315:  
+  316:  /*****************************************************************************
+  317:  * ACC_SetTapPulseDetection
+  318:  *
+  319:  * Setup the tap/pulse dection
+  320:  ******************************************************************************/
+  321:  
+  322:  bool_t ACC_SetTapPulseDetection(gAccTapSetup_t accTapSetup)
+  323:  {
+  324:  #if (gAccelerometerSupported_d == TRUE)
+  325:    if(ACC_InitAppRequest() == FALSE)
+  326:      return FALSE;
+  327:    
+  328:    /* Store information needed for when the acc task will get the chance to run
+  329:    and to start processing this request */
+  330:    mAccStateMachine.appToAccReqType = gAppToAccReqType_SetTapPulseDetection_c;
+  331:  
+  332:    mDataToAcc.regAddress = TAP_DETECTION_REG;                             
+  333:    mDataToAcc.data       = (uint8_t)( accTapSetup.tapDetectThresholdCount | (accTapSetup.xTapDetectEnable << gXdaPos_c) | (accTapSetup.yTapDetectEnable << gYdaPos_c) | (accTapSetup.zTapDetectEnable << gZdaPos_c) );
+  334:  #else
+  335:    (void)accTapSetup;
+  336:  #endif /* gAccelerometerSupported_d */
+  337:    
+  338:    return TRUE;
+  0000 a601     [2]             LDA   #1
+  339:  }
+  0002 8d       [7]             RTC   
+  340:  
+  341:  
+  342:  /*****************************************************************************
+  343:  * ACC_SetTapPulseDebounceCounter
+  344:  *
+  345:  * Setup the tap/pulse debounce counter
+  346:  ******************************************************************************/
+  347:  
+  348:  bool_t ACC_SetTapPulseDebounceCounter(uint8_t accTapDebounceCounter)
+  349:  {
+  350:  #if (gAccelerometerSupported_d == TRUE)
+  351:    if(ACC_InitAppRequest() == FALSE)
+  352:      return FALSE;
+  353:    
+  354:    /* Store information needed for when the acc task will get the chance to run
+  355:    and to start processing this request */
+  356:    mAccStateMachine.appToAccReqType = gAppToAccReqType_SetTapPulseDebounceCounter_c;
+  357:  
+  358:    mDataToAcc.regAddress = TAP_DEBOUNCE_COUNT_REG;                             
+  359:    mDataToAcc.data       = accTapDebounceCounter;
+  360:  #else
+  361:    (void)accTapDebounceCounter;
+  362:  #endif /* gAccelerometerSupported_d */
+  363:    
+  364:    return TRUE;
+  0000 a601     [2]             LDA   #1
+  365:  }
+  0002 8d       [7]             RTC   
+  366:  
+  367:  /*****************************************************************************
+  368:  * ACC_Isr
+  369:  *
+  370:  * Interrupt service routine for external IRQ pin
+  371:  ******************************************************************************/
+  372:  
+  373:  /* Place it in NON_BANKED memory */
+  374:  #ifdef MEMORY_MODEL_BANKED
+  375:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+  376:  #else
+  377:  #pragma CODE_SEG DEFAULT
+  378:  #endif /* MEMORY_MODEL_BANKED */
+  379:  
+  380:  INTERRUPT_KEYWORD void ACC_Isr(void)
+  381:  {
+  382:  #if (gAccelerometerSupported_d == TRUE)
+  383:    /* Check the IRQ interrupt bit */    
+  384:    if(IRQSC & gIrqscFlag_c)
+  385:    {
+  386:      /* clear IRQ flag */
+  387:      IRQSC |= gIrqscAck_c;
+  388:      /* Send event to ACC  */
+  389:      TS_SendEvent(mAccTaskID_c, gAccEvent_AccInterrupt_c);    
+  390:    }
+  391:  #endif /* gAccelerometerSupported_d */
+  392:  }
+  0000 80       [9]             RTI   
+  393:  
+  394:  #pragma CODE_SEG DEFAULT
+  395:    
+  396:    
+  397:  #if (gAccelerometerSupported_d == TRUE)  
+  398:  /*****************************************************************************
+  399:  ******************************************************************************
+  400:  * Private functions
+  401:  ******************************************************************************
+  402:  *****************************************************************************/
+  403:    
+  404:    
+  405:  /*****************************************************************************
+  406:  * ACC_HandleStateIdle
+  407:  *
+  408:  * Handler of the 'Idle' state
+  409:  ******************************************************************************/
+  410:  
+  411:  static void ACC_HandleStateIdle(event_t events)
+  412:  {
+  413:    (void)events;
+  414:    
+  415:    /* There are 2 types of events that can appear while the acc component is in idle state
+  416:        1. Component receives a request from application to execute some action
+  417:        2. Component receives an interrupt from acc peripheral signaling the availability of some data
+  418:       The component will process one event at a time, as both of them involve I2C read and write 
+  419:    operations. The request from application has a higer priority as it may for example request 
+  420:    disabling some active events that are generated very fast (like realTimeMotion), but will not
+  421:    be able to do this if it is always served second */
+  422:  
+  423:    if(mAccStateMachine.eventsForIdleState & gAccEvent_AppServiceRequest_c)
+  424:    {
+  425:      /* Check what type of request has been received from app and act accordingly */
+  426:      switch(mAccStateMachine.appToAccReqType)
+  427:      {
+  428:        case gAppToAccReqType_SetEvents_c:
+  429:          if( IIC_Transmit_Master((uint8_t *)&mDataToAcc, sizeof(mDataToAcc), ACC_SLAVE_ADDRESS, ACC_IICOperationComplete) == FALSE )  
+  430:          { 
+  431:            ACC_SendCnfEventToApp(gAccEventType_SetEventsCnf_c, FALSE);   
+  432:          }
+  433:          else
+  434:          {
+  435:            mAccStateMachine.state = gAccState_SetEvents_c;  
+  436:          }
+  437:          break;
+  438:        
+  439:        case gAppToAccReqType_SetPowerMode_c:
+  440:          /* Read acc mode register */  
+  441:          if(IIC_Receive_Master((uint8_t *)&mDataFromAcc, sizeof(dataFromAcc_t), ACC_SLAVE_ADDRESS, ACC_IICOperationComplete) == FALSE )  
+  442:          {
+  443:            ACC_SendCnfEventToApp(gAccEventType_SetPowerModeCnf_c, FALSE);  
+  444:          }
+  445:          else
+  446:          {
+  447:            mAccStateMachine.state = gAccState_SetPowerMode_c;  
+  448:          }
+  449:          break;
+  450:          
+  451:        case gAppToAccReqType_SetSamplesPerSecond_c:
+  452:          if( IIC_Receive_Master((uint8_t *)&mDataFromAcc, sizeof(dataFromAcc_t), ACC_SLAVE_ADDRESS, ACC_IICOperationComplete) == FALSE)
+  453:          {
+  454:            ACC_SendCnfEventToApp(gAccEventType_SetSamplesPerSecondCnf_c, FALSE);
+  455:          }
+  456:          else
+  457:          {
+  458:            mAccStateMachine.state = gAccState_SetSamplesPerSecond_c;   
+  459:          }
+  460:          break;
+  461:  
+  462:        case gAppToAccReqType_SetTapPulseDetection_c:
+  463:          if( IIC_Transmit_Master((uint8_t *)&mDataToAcc, sizeof(mDataToAcc), ACC_SLAVE_ADDRESS, ACC_IICOperationComplete) == FALSE )  
+  464:          {
+  465:            ACC_SendCnfEventToApp(gAccEventType_SetTapDetectionCnf_c, FALSE);
+  466:          }    
+  467:          else
+  468:          {
+  469:            mAccStateMachine.state = gAccState_SetTapPulseDetection_c;    
+  470:          }
+  471:          break;
+  472:          
+  473:        case gAppToAccReqType_SetTapPulseDebounceCounter_c:
+  474:          if( IIC_Transmit_Master((uint8_t *)&mDataToAcc, sizeof(mDataToAcc), ACC_SLAVE_ADDRESS, ACC_IICOperationComplete) == FALSE )  
+  475:          {
+  476:            ACC_SendCnfEventToApp(gAccEventType_SetTapDebounceCounterCnf_c, FALSE);
+  477:          }      
+  478:          else
+  479:          {
+  480:            mAccStateMachine.state = gAccState_SetTapPulseDebounceCounter_c;      
+  481:          }
+  482:          break;
+  483:      }
+  484:      /* Clear the event, as it has been processed */
+  485:      mAccStateMachine.eventsForIdleState &= ~gAccEvent_AppServiceRequest_c; 
+  486:    }
+  487:    else if(mAccStateMachine.eventsForIdleState & gAccEvent_AccInterrupt_c)
+  488:    {
+  489:      /* Try to read the ACC tilt register.
+  490:         If not successful, do not clear the event in order to retry reading the register next time the task is run
+  491:         This is very important, because as long as we don't successfully read the tilt register, no future interrupt will be triggered 
+  492:      by the accelerometer */
+  493:      if( IIC_Receive_Master((uint8_t *)&mDataFromAcc, sizeof(dataFromAcc_t), ACC_SLAVE_ADDRESS, ACC_IICOperationComplete) == TRUE)
+  494:      { 
+  495:        mAccStateMachine.state = gAccState_GetEvents_c;
+  496:        /* Clear the event, as it has been processed */
+  497:        mAccStateMachine.eventsForIdleState &= ~gAccEvent_AccInterrupt_c; 
+  498:      }
+  499:    }
+  500:  }
+  501:  
+  502:  
+  503:  
+  504:  
+  505:  /*****************************************************************************
+  506:  * ACC_HandleStateSetEvents
+  507:  *
+  508:  * Handler of the 'Set Events' state
+  509:  ******************************************************************************/
+  510:  
+  511:  static void ACC_HandleStateSetEvents(event_t events)
+  512:  {
+  513:    if(events & gAccEvent_IICOperationFailed_c)
+  514:    {
+  515:      ACC_SendCnfEventToApp(gAccEventType_SetEventsCnf_c, FALSE);     
+  516:    }
+  517:    else if(events & gAccEvent_IICOperationSuccess_c)
+  518:    {
+  519:      ACC_SendCnfEventToApp(gAccEventType_SetEventsCnf_c, TRUE);   
+  520:    }
+  521:  }
+  522:  
+  523:  
+  524:  /*****************************************************************************
+  525:  * ACC_HandleStateSetPowerMode
+  526:  *
+  527:  * Handler of the 'Set Power Mode' state
+  528:  ******************************************************************************/
+  529:  
+  530:  static void ACC_HandleStateSetPowerMode(event_t events)
+  531:  {
+  532:    switch(mAccStateMachine.substate)
+  533:    {
+  534:      case gAccSubstate_WaitToReadPowerModeReg_c:
+  535:        if(events & gAccEvent_IICOperationFailed_c)
+  536:        {
+  537:          ACC_SendCnfEventToApp(gAccEventType_SetPowerModeCnf_c, FALSE);     
+  538:        }
+  539:        else if(events & gAccEvent_IICOperationSuccess_c)
+  540:        {
+  541:          /* Make logical OR between what we have received from application and what we have read from ACC */
+  542:          mDataToAcc.data |=  (mDataFromAcc.modeReg & (~gModeSetupActive_c)) | gModeSetupIpp_c | gModeSetupIah_c;
+  543:          if( IIC_Transmit_Master((uint8_t *)&mDataToAcc, sizeof(dataToAcc_t), ACC_SLAVE_ADDRESS, ACC_IICOperationComplete) == FALSE )  
+  544:          {
+  545:            ACC_SendCnfEventToApp(gAccEventType_SetPowerModeCnf_c, FALSE);     
+  546:          }
+  547:          else
+  548:          {
+  549:            /* Advance SM */
+  550:            mAccStateMachine.substate = gAccSubstate_WaitToWritePowerModeReg_c;          
+  551:          }
+  552:        }
+  553:        break;
+  554:  
+  555:      case gAccSubstate_WaitToWritePowerModeReg_c:
+  556:        if(events & gAccEvent_IICOperationFailed_c)
+  557:        {
+  558:          ACC_SendCnfEventToApp(gAccEventType_SetPowerModeCnf_c, FALSE);     
+  559:        }
+  560:        else if(events & gAccEvent_IICOperationSuccess_c)
+  561:        {
+  562:          ACC_SendCnfEventToApp(gAccEventType_SetPowerModeCnf_c, TRUE);   
+  563:        }
+  564:        break;
+  565:    }
+  566:  }
+  567:  
+  568:  
+  569:  
+  570:  /*****************************************************************************
+  571:  * ACC_HandleStateSetSamplesPerSecond
+  572:  *
+  573:  * Handler of the 'Set Samples Per Second' state
+  574:  ******************************************************************************/
+  575:  
+  576:  static void ACC_HandleStateSetSamplesPerSecond(event_t events)
+  577:  {
+  578:    switch(mAccStateMachine.substate)
+  579:    {
+  580:      case gAccSubstate_WaitToReadSampleReg_c:
+  581:        if(events & gAccEvent_IICOperationFailed_c)
+  582:        {
+  583:          ACC_SendCnfEventToApp(gAccEventType_SetSamplesPerSecondCnf_c, FALSE);     
+  584:        }
+  585:        else if(events & gAccEvent_IICOperationSuccess_c)
+  586:        {
+  587:          /* Write back the sample register */
+  588:          mDataToAcc.data = mDataFromAcc.mSR_Reg & mDataToAccMask;
+  589:          if( IIC_Transmit_Master((uint8_t *)&mDataToAcc, sizeof(dataToAcc_t), ACC_SLAVE_ADDRESS, ACC_IICOperationComplete) == FALSE )  
+  590:          {
+  591:            ACC_SendCnfEventToApp(gAccEventType_SetSamplesPerSecondCnf_c, FALSE); 
+  592:          }
+  593:          else
+  594:          {
+  595:            /* Advance SM */
+  596:            mAccStateMachine.substate = gAccSubstate_WaitToWriteSampleReg_c;       
+  597:          }        
+  598:        }
+  599:        break;
+  600:  
+  601:      case gAccSubstate_WaitToWriteSampleReg_c:
+  602:        if(events & gAccEvent_IICOperationFailed_c)
+  603:        {
+  604:          ACC_SendCnfEventToApp(gAccEventType_SetSamplesPerSecondCnf_c, FALSE);     
+  605:        }
+  606:        else if(events & gAccEvent_IICOperationSuccess_c)
+  607:        {
+  608:          ACC_SendCnfEventToApp(gAccEventType_SetSamplesPerSecondCnf_c, TRUE);   
+  609:        }
+  610:        break;
+  611:    }
+  612:  }
+  613:  
+  614:  
+  615:  
+  616:  
+  617:  /*****************************************************************************
+  618:  * ACC_HandleStateSetTapPulseDetection
+  619:  *
+  620:  * Handler of the 'Set Tap Pulse Detection' state
+  621:  ******************************************************************************/
+  622:  
+  623:  static void ACC_HandleStateSetTapDetection(event_t events)
+  624:  {
+  625:    if(events & gAccEvent_IICOperationFailed_c)
+  626:    {
+  627:      ACC_SendCnfEventToApp(gAccEventType_SetTapDetectionCnf_c, FALSE);     
+  628:    }
+  629:    else if(events & gAccEvent_IICOperationSuccess_c)
+  630:    {
+  631:      ACC_SendCnfEventToApp(gAccEventType_SetTapDetectionCnf_c, TRUE);   
+  632:    }
+  633:  }
+  634:  
+  635:  
+  636:  
+  637:  /*****************************************************************************
+  638:  * ACC_HandleStateSetTapDebounce
+  639:  *
+  640:  * Handler of the 'Set Tap Debounce ' state
+  641:  ******************************************************************************/
+  642:  
+  643:  static void ACC_HandleStateSetTapDebounceCounter(event_t events)
+  644:  {
+  645:    if(events & gAccEvent_IICOperationFailed_c)
+  646:    {
+  647:      ACC_SendCnfEventToApp(gAccEventType_SetTapDebounceCounterCnf_c, FALSE);     
+  648:    }
+  649:    else if(events & gAccEvent_IICOperationSuccess_c)
+  650:    {
+  651:      ACC_SendCnfEventToApp(gAccEventType_SetTapDebounceCounterCnf_c, TRUE);   
+  652:    }
+  653:  }
+  654:  
+  655:    
+  656:    
+  657:  /*****************************************************************************
+  658:  * ACC_HandleStateGetEvents
+  659:  *
+  660:  * Handler of the 'Get Events' state. This state is responsible for reading
+  661:  * data from accelerometer every time the accelerometer activates the IRQ
+  662:  ******************************************************************************/
+  663:  
+  664:  static void ACC_HandleStateGetEvents(event_t events)
+  665:  {
+  666:    accEvent_t accEvent;
+  667:    
+  668:    if(events & gAccEvent_IICOperationSuccess_c)      
+  669:    {
+  670:      /* Inspect the accelerometer interrupt source */
+  671:      if(mDataFromAcc.tiltStatusReg & gTilt_AlertMask_c)
+  672:      {
+  673:        /* Data read from ACC is not valid. Do not report any indication to the
+  674:        application. Go back to idle state */     
+  675:        mAccStateMachine.state     = gAccState_Idle_c; 
+  676:        mAccStateMachine.substate  = 0x00;
+  677:        
+  678:        return;          
+  679:      }      
+  680:                      
+  681:      if( (mDataFromAcc.tiltStatusReg & gTilt_ShakeMask_c) && (mDataFromAcc.interruptSetupReg & (gIntsu_ShakeOnX_c | gIntsu_ShakeOnY_c | gIntsu_ShakeOnZ_c)) )
+  682:      {
+  683:        /* Shake was detected */
+  684:        accEvent.accEventType = gAccEventType_ShakeInd_c;
+  685:        ACC_SendIndEventToApp(accEvent);               
+  686:      }
+  687:      if( (mDataFromAcc.tiltStatusReg & gTilt_TapMask_c) && (mDataFromAcc.interruptSetupReg & gIntsu_TapDetetectInt_c))
+  688:      {
+  689:        /* Tap was detected*/
+  690:        accEvent.accEventType = gAccEventType_TapInd_c;
+  691:        ACC_SendIndEventToApp(accEvent);                              
+  692:      }        
+  693:      if( (mDataFromAcc.tiltStatusReg & gTilt_PoLaMask_c) && (mDataFromAcc.interruptSetupReg & gIntsu_PLInt_c) )
+  694:      {
+  695:        /* Up, down, left or right condition is detected */
+  696:        accEvent.accEventType = gAccEventType_LeftRightUpDownInd_c;
+  697:        accEvent.eventBody.accLeftRightUpDownInd.direction = (accUpDownLeftRight_t)((mDataFromAcc.tiltStatusReg & gTilt_PoLaMask_c) >> gTilt_PoLaPos_c);
+  698:        ACC_SendIndEventToApp(accEvent);          
+  699:      }            
+  700:      if( (mDataFromAcc.tiltStatusReg & gTilt_BaFroMask_c) && (mDataFromAcc.interruptSetupReg & gIntsu_FBInt_c))        
+  701:      {
+  702:        /* Back, front condition is detected */
+  703:        accEvent.accEventType = gAccEventType_FrontBackInd_c;
+  704:        accEvent.eventBody.accFrontBackInd.direction = (accFrontBack_t)(mDataFromAcc.tiltStatusReg & gTilt_BaFroMask_c);
+  705:        ACC_SendIndEventToApp(accEvent);          
+  706:      }        
+  707:      /* Interupt on G */
+  708:      if( (mDataFromAcc.xOutReg & gTilt_AlertMask_c) || (mDataFromAcc.yOutReg & gTilt_AlertMask_c) || (mDataFromAcc.zOutReg & gTilt_AlertMask_c) )
+  709:      {
+  710:        /* Data read from ACC is not valid. Do not report any indication to the
+  711:        application. Go back to idle state */     
+  712:        mAccStateMachine.state     = gAccState_Idle_c; 
+  713:        mAccStateMachine.substate  = 0x00;
+  714:        return;
+  715:      }
+  716:      else
+  717:      {
+  718:        if(mDataFromAcc.interruptSetupReg & gIntsu_GInt_c)
+  719:        {            
+  720:          accEvent.accEventType = gAccEventType_RealTimeMotionInd_c;
+  721:          accEvent.eventBody.accRealTimeMotionInd.X = mDataFromAcc.xOutReg;          
+  722:          accEvent.eventBody.accRealTimeMotionInd.Y = mDataFromAcc.yOutReg;          
+  723:          accEvent.eventBody.accRealTimeMotionInd.Z = mDataFromAcc.zOutReg;          
+  724:          ACC_SendIndEventToApp(accEvent); 
+  725:        }
+  726:      }        
+  727:    }
+  728:    else
+  729:    {
+  730:      /* We need to read again the tilt register of the accelerometer. This is done on idle state */
+  731:      mAccStateMachine.state     = gAccState_Idle_c; 
+  732:      TS_SendEvent(mAccTaskID_c, gAccEvent_AccInterrupt_c);
+  733:    }
+  734:  }
+  735:    
+  736:  
+  737:  /*****************************************************************************
+  738:  * ACC_InitAppRequest
+  739:  *
+  740:  * Tries to initialize a new request from the application
+  741:  ******************************************************************************/
+  742:  
+  743:  static bool_t ACC_InitAppRequest(void)
+  744:  {  
+  745:    /* If another app request is already processing, return fail status */
+  746:    if (mAccStateMachine.bAppRequestInProcess)
+  747:      return FALSE; 
+  748:    
+  749:    mAccStateMachine.bAppRequestInProcess = TRUE;
+  750:    
+  751:    /* Send event to acc task to inform it that a request from app is pending */
+  752:    TS_SendEvent(mAccTaskID_c, gAccEvent_AppServiceRequest_c); 
+  753:    
+  754:    return TRUE;
+  755:  }
+  756:    
+  757:    
+  758:  /*****************************************************************************
+  759:  * ACC_IICOperationComplete
+  760:  *
+  761:  * Triggered every time a IIC read or write operation completes
+  762:  ******************************************************************************/
+  763:  
+  764:  static void ACC_IICOperationComplete(uint8_t status)
+  765:  {
+  766:    if(status == TRUE)
+  767:    {
+  768:      TS_SendEvent(mAccTaskID_c, gAccEvent_IICOperationSuccess_c);
+  769:    }
+  770:    else
+  771:    {
+  772:      TS_SendEvent(mAccTaskID_c, gAccEvent_IICOperationFailed_c);
+  773:    }        
+  774:  }
+  775:  
+  776:  
+  777:  /*****************************************************************************
+  778:  * ACC_SendCnfEventToApp
+  779:  *
+  780:  * Sends the confirm event to the application
+  781:  ******************************************************************************/
+  782:  
+  783:  static void ACC_SendCnfEventToApp(accEventType_t accEventType, bool_t status)
+  784:  {
+  785:    accEvent_t accEvent;
+  786:  
+  787:    accEvent.accEventType                     = accEventType;
+  788:    accEvent.eventBody.accSetEventsCnf.status = status;
+  789:    /* App request executed */
+  790:    mAccStateMachine.bAppRequestInProcess = FALSE;
+  791:    /* Can switch back to idle state */
+  792:    mAccStateMachine.state     = gAccState_Idle_c; 
+  793:    mAccStateMachine.substate  = 0x00;
+  794:    /* Send confirm to application */ 
+  795:    mpfKeyFunction(accEvent);   
+  796:  }
+  797:  
+  798:  
+  799:  /*****************************************************************************
+  800:  * ACC_SendIndToApp
+  801:  *
+  802:  * Sends the indication event to the application
+  803:  ******************************************************************************/
+  804:  
+  805:  static void ACC_SendIndEventToApp(accEvent_t accEvent)
+  806:  {
+  807:    /* Can switch back to idle state */
+  808:    mAccStateMachine.state     = gAccState_Idle_c; 
+  809:    mAccStateMachine.substate  = 0x00;
+  810:    /* Send confirm to application */ 
+  811:    mpfKeyFunction(accEvent);   
+  812:  }
+  813:  
+  814:  #endif /* gAccelerometerSupported_d */
+  815:  

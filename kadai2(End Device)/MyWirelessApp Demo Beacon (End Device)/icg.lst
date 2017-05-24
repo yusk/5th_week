@@ -1,0 +1,194 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * This module contains code for the ICG (Internal Clock Generator) module.
+    3:  * 
+    4:  * Note! Support for selecting external crystal and external clock source from Abel 2.0
+    5:  *
+    6:  *
+    7:  * (c) Copyright 2006, Freescale Semiconductor, Inc. All rights reserved.
+    8:  *
+    9:  *
+   10:  * No part of this document must be reproduced in any form - including copied,
+   11:  * transcribed, printed or by any electronic means - without specific written
+   12:  * permission from Freescale Semiconductor.
+   13:  ************************************************************************************/
+   14:  
+   15:  #include "IrqControlLib.h"
+   16:  #include "EmbeddedTypes.h"
+   17:  #include "PowerManager.h"
+   18:  #include "ICG.h"
+   19:  
+   20:  
+   21:  
+   22:  // **************************************************************************
+   23:  
+   24:  #pragma MESSAGE DISABLE C4200  // Warning C4200: Other segment than in previous declaration
+   25:  #pragma DATA_SEG BOOTLOADER_VARIABLES
+   26:  
+   27:  	// Global variables
+   28:  	volatile bool_t init_mode = TRUE;
+   29:  
+   30:  #pragma DATA_SEG DEFAULT
+   31:  
+   32:  // **************************************************************************
+   33:  
+   34:  #pragma DATA_SEG SLEEP_VARIABLE
+   35:  	uint8_t gPowerSaveMode;
+   36:  #pragma DATA_SEG DEFAULT
+   37:  
+   38:  #ifdef PROCESSOR_HCS08
+   39:  void ICG_Setup(void)
+   40:  {
+   41:  uint8_t loop_counter;
+   42:  
+   43:  	SETUP_LED_PORT
+   44:  	
+   45:  	SET_LED1 // Show entry in function
+   46:  
+   47:  	SET_LED2 // Cleared first time in loop
+   48:  	CLEAR_LED3
+   49:  	CLEAR_LED4
+   50:  
+   51:  	if(gPowerSaveMode == 0)
+   52:  	{
+   53:  		// Not in power save mode
+   54:  
+   55:  		// Loop until clock is locked
+   56:  		for(;;)
+   57:  		{
+   58:  			TOGGLE_LED2
+   59:  
+   60:  			if((ICGS1 & ICG_IRQ_PENDING) == ICG_IRQ_PENDING)
+   61:  				ICGS1 |= ICG_IRQ_PENDING; // Clear FLL lost lock interrupt
+   62:  
+   63:  			if(init_mode == FALSE)
+   64:  			{
+   65:  				TOGGLE_LED3
+   66:  				
+   67:  				// Is filter value drifting?
+   68:  				if(ICGFLTH > ICGFLTH_VALUE_8MHZ)
+   69:  				{
+   70:  					TOGGLE_LED4
+   71:  					
+   72:  					SCM_8MHZ_DEFAULT_ICG_FILTER
+   73:  					WAIT_FOR_STABLE_CLOCK
+   74:  				}
+   75:  
+   76:  				SELECT_SCM_MODE // DO NOT CALL THIS CODE UNDER INIT
+   77:  
+   78:  				WAIT_FOR_STABLE_CLOCK
+   79:  			}
+   80:  			else
+   81:  				init_mode = FALSE; // Only one time under init
+   82:  
+   83:  			SETUP_ABEL_CLOCK
+   84:  
+   85:  			WAIT_FOR_STABLE_CLOCK
+   86:  
+   87:  			SETUP_ICG_MODULE
+   88:  
+   89:  			WAIT_FOR_STABLE_CLOCK
+   90:  
+   91:  			loop_counter = LOOP_COUNTER_VALUE;
+   92:  
+   93:  			// Wait for clock to lock
+   94:        while(!ICG_IsFllLocked() && loop_counter-- > 0);
+   95:  
+   96:  			// Check exit condition
+   97:  			if(ICG_IsFllLocked())
+   98:  				break; // Clock is locked - get out
+   99:  		}
+  100:  	}
+  101:  	else
+  102:  	{
+  103:  		// In power save mode - set SCM clock.
+  104:  		SCM_2MHZ_ICG_FILTER
+  105:  	}
+  106:  	
+  107:  	MEASURING_BUS_CLOCK
+  108:  	
+  109:  	CLEAR_LED1 // Show exit of function
+  110:  }
+  111:  #endif /* PROCESSOR_HCS08 */
+  112:  
+  113:  // **************************************************************************
+  114:  
+  115:  #ifdef PROCESSOR_QE128
+  116:  void ICG_SetupQE128(void) 
+  117:  {
+  118:    uint16_t reg = 0;
+  119:    /* RST de-asserted. Wait for transceiver to become active (idle mode) */
+  120:    do 
+  121:    {
+  122:     /* Write Abel/Toro clock */
+  123:     MC1319xDrv_WriteSpiAsync(ABEL_regA, gHardwareParameters.Abel_Clock_Out_Setting);
+  124:     
+  125:     WAIT_FOR_STABLE_CLOCK
+  126:     
+  127:     /* Read Back Abel/Toro clock */
+  128:     MC1319xDrv_ReadSpiAsync(ABEL_regA, &reg);
+  129:    }while(reg != gHardwareParameters.Abel_Clock_Out_Setting);
+  130:    
+  131:    /* SPI Active. Abel/Toro clock set */
+  132:         
+  133:    ICSC2 = gHardwareParameters.NV_ICSC2 & 0xF7; /* Do not write the LP bit at this point */    
+  134:    ICSC1 = gHardwareParameters.NV_ICSC1; /* program the requested ICSC1 values */  
+  135:    ICSTRM = gHardwareParameters.NV_ICSTRM;
+  136:      
+  137:    ICSSC = gHardwareParameters.NV_ICSSC;
+  138:      
+  139:    /* wait for clock to settle */
+  140:    while(!ICG_IsFllLocked());
+  141:    
+  142:    if(gHardwareParameters.NV_ICSC2 & 0x08) 
+  143:    {
+  144:     ICSC2 |= 0x08; /* write the LP bit */
+  145:    }
+  146:    
+  147:  }
+  148:  #endif /* PROCESSOR_QE128 */
+  149:  // **************************************************************************
+  150:  
+  151:  
+  152:  void PowerManager_WaitForPowerUp(void)
+  153:  {
+  154:   #if defined(PROCESSOR_QE128)
+  155:    ICG_SetupQE128();
+  156:   #elif defined(PROCESSOR_MC1323X)
+  157:   LVDTRIM = 0x19; // trim value seen on the scope
+  0000 a619     [2]             LDA   #25
+  0002 45180d   [3]             LDHX  #6157
+  0005 e760     [3]             STA   96,X
+  158:   /* SOMC1 register should be set by application */
+  159:   //SOMC1 = gHardwareParameters.SOMC1_value;
+  160:   SOMC2 = gHardwareParameters.Xtal_Trim;
+  0007 c60007   [4]             LDA   gHardwareParameters:7
+  000a f7       [2]             STA   ,X
+  161:   SCGC1 = gHardwareParameters.SCGC1_value;
+  000b c60008   [4]             LDA   gHardwareParameters:8
+  000e e701     [3]             STA   1,X
+  162:   SCGC2 = gHardwareParameters.SCGC2_value;
+  0010 c60009   [4]             LDA   gHardwareParameters:9
+  0013 e702     [3]             STA   2,X
+  163:   #else
+  164:  	ICG_Setup(); // Reuse code in function to reduce code size
+  165:   #endif /* PROCESSOR_QE128 */
+  166:  }
+  0015 8d       [7]             RTC   
+  167:  
+  168:    
+  169:  // **************************************************************************
+  170:  
+  171:  #ifdef PROCESSOR_HCS08
+  172:  INTERRUPT_KEYWORD void FLL_Lost_Lock_ISR(void)
+  173:  {
+  174:  	// Setup ICG module again to prevent that system hangs forever.
+  175:  	
+  176:  	ICGS1 |= 0x01; // Clear FLL lost lock interrupt
+  177:  
+  178:      // Ensure MCU clk is stable
+  179:    PowerManager_WaitForPowerUp();
+  180:  }
+  181:  #endif /* PROCESSOR_HCS08 */

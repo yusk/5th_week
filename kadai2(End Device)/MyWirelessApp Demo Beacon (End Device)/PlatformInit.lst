@@ -1,0 +1,300 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * This file contains Platform specific implentations of BTA functions.
+    3:  * For the Windows Simulator Platform.
+    4:  *
+    5:  *
+    6:  * (c) Copyright 2006, Freescale Semiconductor, Inc. All rights reserved.
+    7:  *
+    8:  *
+    9:  * No part of this document must be reproduced in any form - including copied,
+   10:  * transcribed, printed or by any electronic means - without specific written
+   11:  * permission from Freescale Semiconductor.
+   12:  ************************************************************************************/
+   13:  
+   14:  
+   15:  /************************************************************************************
+   16:  * Includes
+   17:  ************************************************************************************/
+   18:  #include "IoConfig.h"
+   19:  #include "PortConfig.h"
+   20:  #include "IrqControlLib.h"
+   21:  #include "Mc1319xDrv.h"
+   22:  #include "Crt0.h"
+   23:  #include "NV_Data.h"
+   24:  #include "PowerManager.h"
+   25:  #include "MacPhyInit.h"
+   26:  #include "PlatformInit.h"
+   27:  
+   28:  #include "FunctionLib.h"  // To write ext addr - pls remove this @KDO
+   29:  //#include "MacConst.h" // To get aExtendedAddress - must be possible to access 
+   30:  
+   31:  extern uint8_t aExtendedAddress[8];
+   32:  /*************************************************************************************
+   33:  *************************************************************************************
+   34:  * External platform references
+   35:  *************************************************************************************
+   36:  ************************************************************************************/
+   37:    // NOTE!!! This code is only added to get the symbols in the build. The linker will remove these symbols if not referenced.
+   38:    // Hope to find a better way 21.10.03 MVC 
+   39:  #ifdef MEMORY_MODEL_BANKED  
+   40:  typedef void __near(* __near ISR_func_t)(void);
+   41:  #else
+   42:  typedef void (*__near ISR_func_t)(void);
+   43:  #endif /* MEMORY_MODEL_BANKED */
+   44:  extern const ISR_func_t ISR_vectors[]; 
+   45:  extern const ISR_func_t Reset_vector[];	 // The system reset vector
+   46:  
+   47:  /*************************************************************************************
+   48:  *************************************************************************************
+   49:  * Private functions
+   50:  *************************************************************************************
+   51:  ************************************************************************************/
+   52:  
+   53:  
+   54:  /************************************************************************************
+   55:  *************************************************************************************
+   56:  * Public function(s)
+   57:  *************************************************************************************
+   58:  ************************************************************************************/
+   59:  
+   60:  
+   61:  
+   62:  /************************************************************************************
+   63:  * Perform the complete GPIO port initialization
+   64:  *
+   65:  * Interface assumptions:
+   66:  *
+   67:  * Return value:
+   68:  *   NONE
+   69:  *
+   70:  * Revision history:
+   71:  *
+   72:  ************************************************************************************/
+   73:  void PlatformPortInit(void)
+   74:  {
+   75:    // Platform ports default configuration/initialization
+   76:    // Setup port A
+   77:    mSETUP_PORT_A
+  0000 3f00     [5]             CLR   0
+  0002 4f       [1]             CLRA  
+  0003 451830   [3]             LDHX  #6192
+  0006 f7       [2]             STA   ,X
+  0007 6e1101   [4]             MOV   #17,1
+  000a e702     [3]             STA   2,X
+   78:  
+   79:    // Setup Port B
+   80:    mSETUP_PORT_B
+  000c 3f02     [5]             CLR   2
+  000e a68f     [2]             LDA   #-113
+  0010 e704     [3]             STA   4,X
+  0012 3f03     [5]             CLR   3
+  0014 4f       [1]             CLRA  
+  0015 e706     [3]             STA   6,X
+   81:  
+   82:    // Setup port C
+   83:    mSETUP_PORT_C
+  0017 3f04     [5]             CLR   4
+  0019 e708     [3]             STA   8,X
+  001b 6e0305   [4]             MOV   #3,5
+  001e e70a     [3]             STA   10,X
+   84:  
+   85:    // Setup port D
+   86:    mSETUP_PORT_D
+  0020 3f06     [5]             CLR   6
+  0022 e70c     [3]             STA   12,X
+  0024 6e0707   [4]             MOV   #7,7
+  0027 e70e     [3]             STA   14,X
+   87:  
+   88:    // Setup port E
+   89:    mSETUP_PORT_E
+   90:  
+   91:    // Setup port F
+   92:    mSETUP_PORT_F
+   93:  
+   94:    // Setup port G
+   95:    mSETUP_PORT_G
+   96:  
+   97:  #ifdef PROCESSOR_QE128  
+   98:    // Setup port H  
+   99:    mSETUP_PORT_H
+  100:  #endif  
+  101:  #if (gTarget_UserDefined_d == 1) 
+  102:    mSETUP_TRANCEIVER_PORT
+  103:    mSETUP_SWICH_PORT
+  104:    mSETUP_LED_PORT
+  105:    mSETUP_SCIxPINS
+  106:  #endif 
+  107:  
+  108:  #ifdef I_AM_A_SNIFFER
+  109:    TPM1SC = 0x0c; // Use BUSCLK and prescale with factor 16 (to get 1 us)
+  110:    TPM1C1SC = 0x04; // Disable interrupt, Input capture, Capture on rising edge
+  111:  #endif I_AM_A_SNIFFER
+  112:  
+  113:  }
+  0029 8d       [7]             RTC   
+  114:  
+  115:  
+  116:  /************************************************************************************
+  117:  * Initialize platform specific stuff
+  118:  * NVRAM, Bootloader, MC1319x driver etc.
+  119:  *
+  120:  * Interface assumptions:
+  121:  *
+  122:  *   NOTE!!! This First section of this function code is added to ensure that the symbols 
+  123:  *   are included in the build. The linker will remove these symbols if not referenced.
+  124:  *   Hope to find a better way 21.10.03 MVC 
+  125:  *
+  126:  * Return value:
+  127:  *   NONE
+  128:  *
+  129:  * Revision history:
+  130:  *
+  131:  ************************************************************************************/
+  132:  void Platform_Init(void) {
+  0000 8b       [2]             PSHH  
+  133:  
+  134:  volatile uint8_t dummy;
+  135:  /************* Symbol include section begin *************************/
+  136:  
+  137:  /*Touch gFreescaleVersionStrings to ensure that the linker includes it in code */
+  138:    dummy = gFreescaleVersionStrings.MCU_Version;
+  0001 c60020   [4]             LDA   gFreescaleVersionStrings:32
+  0004 95       [2]             TSX   
+  0005 f7       [2]             STA   ,X
+  139:  
+  140:  /* Touch ISR_Vectors to ensure that the linker includes it in code */
+  141:    dummy = (uint8_t)ISR_vectors[0];    
+  0006 c60001   [4]             LDA   ISR_vectors:1
+  0009 f7       [2]             STA   ,X
+  142:    dummy = (uint8_t)none_volatile_struct.nv_backkey[0];  
+  000a c60000   [4]             LDA   none_volatile_struct
+  000d f7       [2]             STA   ,X
+  143:    dummy = (uint8_t)Reset_vector[0];
+  000e c60001   [4]             LDA   Reset_vector:1
+  0011 f7       [2]             STA   ,X
+  144:    
+  145:  #ifdef FLASH_LIB_ENABLED
+  146:    	// Add this compiler define if the flash library is included in the application
+  147:  	NV_Flash_Setup();
+  148:  #endif FLASH_LIB_ENABLED
+  149:  
+  150:   
+  151:  
+  152:  
+  153:  /************* Symbol include section end ****************************/
+  154:  
+  155:  
+  156:      // Init MCU specifics: GPIO ports, SPI - and reset MC1319x
+  157:    PlatformPortInit();   // Initializes GPIO port settings.
+  0012 ac000000 [8]             CALL  PlatformPortInit
+  158:    #ifndef PROCESSOR_MC1323X
+  159:    MC1319xDrv_Init();    // Init SPI for MC1319x driver
+  160:    MC1319xDrv_Reset();   // Reset MC1319x
+  161:    #endif  
+  162:    
+  163:      // Ensure MCU clk is stable
+  164:    PowerManager_WaitForPowerUp();
+  0016 ac000000 [8]             CALL  PowerManager_WaitForPowerUp
+  165:  }
+  001a 8a       [3]             PULH  
+  001b 8d       [7]             RTC   
+  166:  
+  167:  
+  168:  /************************************************************************************
+  169:  * Initialize platform and stack. 
+  170:  *
+  171:  * This function is the main initialization procedure, which will be called from the 
+  172:  * startup code of the project. 
+  173:  * If the code is build as a stand-alone application, this function is
+  174:  * called from main() below. 
+  175:  *
+  176:  * Interface assumptions:
+  177:  *
+  178:  * Return value:
+  179:  *   NONE
+  180:  *
+  181:  ************************************************************************************/
+  182:  void Init_802_15_4(void)
+  183:  {
+  184:    bool_t relaxedTiming;  
+  185:  
+  186:    relaxedTiming = gHardwareParameters.Bus_Frequency_In_MHz<12;
+  0000 c60006   [4]             LDA   gHardwareParameters:6
+  0003 a10c     [2]             CMP   #12
+  0005 2502     [3]             BCS   L9 ;abs = 0009
+  0007 4f       [1]             CLRA  
+  0008 65       [3]             SKIP2 LB ;abs = 000b
+  0009          L9:     
+  0009 a601     [2]             LDA   #1
+  000b          LB:     
+  187:    
+  188:    // Init 802.15.4 MAC/PHY stack
+  189:  #ifndef PROCESSOR_MC1323X
+  190:    MacPhyInit_Initialize(relaxedTiming, gHardwareParameters.Abel_HF_Calibration,
+  191:    gHardwareParameters.defaultPowerLevel, (uint8_t*)gHardwareParameters.paPowerLevelLimits, gHardwareParameters.useDualAntenna);
+  192:  #else
+  193:    MacPhyInit_Initialize(relaxedTiming, 0,
+  000b 87       [2]             PSHA  
+  000c 4f       [1]             CLRA  
+  000d 87       [2]             PSHA  
+  000e 87       [2]             PSHA  
+  000f ce0012   [4]             LDX   gHardwareParameters:18
+  0012 89       [2]             PSHX  
+  0013 450016   [3]             LDHX  @gHardwareParameters:22
+  0016 ac000000 [8]             CALL  MacPhyInit_Initialize
+  001a a704     [2]             AIS   #4
+  194:    gHardwareParameters.defaultPowerLevel, (uint8_t*)gHardwareParameters.paPowerLevelLimits, FALSE);    
+  195:    // Aplly NV_Data radio settings
+  196:    PP_PHY_CCATHRSHD = gHardwareParameters.ccaThreshold;
+  001c c60014   [4]             LDA   gHardwareParameters:20
+  001f c71858   [4]             STA   6232
+  197:    PP_PHY_CCAOFSCMP = gHardwareParameters.ccaOffset;  
+  0022 c60015   [4]             LDA   gHardwareParameters:21
+  0025 c71859   [4]             STA   6233
+  198:  #endif  
+  199:  
+  200:  #ifndef PROCESSOR_MC1323X  
+  201:    FLib_MemCpy(aExtendedAddress, ( void * ) gHardwareParameters.MAC_Address, 8);
+  202:  #else
+  203:    MacPhyInit_WriteExtAddress((uint8_t*)&gHardwareParameters.MAC_Address[0]); 
+  0028 45000a   [3]             LDHX  @gHardwareParameters:10
+  002b ac000000 [8]             CALL  MacPhyInit_WriteExtAddress
+  204:  #endif
+  205:  }
+  002f 8d       [7]             RTC   
+  206:  
+  207:  /************************************************************************************
+  208:  * Initialize and setups the PPD capability
+  209:  *
+  210:  ************************************************************************************/
+  211:  
+  212:  
+  213:  #ifdef PROCESSOR_MC1323X
+  214:  void PPD_InitPpdMode(void) 
+  215:  {        
+  216:    #if (gPpdMode_d == gPpdModeOFF_d)
+  217:      IoIndirectWrite(0x17, 0x00);      
+  0000 a617     [2]             LDA   #23
+  0002 c7185b   [4]             STA   6235
+  0005 4f       [1]             CLRA  
+  0006 c7185c   [4]             STA   6236
+  218:    #elif (gPpdMode_d == gPpdModeON_LowThrs)
+  219:      IoIndirectWrite(0x17, 0xF9);  
+  220:      IoIndirectWrite(0x45, 0x17);      
+  221:    #elif (gPpdMode_d == gPpdModeON_MidThrs)
+  222:      IoIndirectWrite(0x17, 0xF9);  
+  223:      IoIndirectWrite(0x45, 0x16);        
+  224:    #elif (gPpdMode_d == gPpdModeON_HighThrs)
+  225:      IoIndirectWrite(0x17, 0xF9);  
+  226:      IoIndirectWrite(0x45, 0x15);      
+  227:    #endif //gPpdMode_d
+  228:  }
+  0009 8d       [7]             RTC   
+  229:  #endif //PROCESSOR_MC1323X
+  230:  
+  231:  
+  232:  
+  233:  
