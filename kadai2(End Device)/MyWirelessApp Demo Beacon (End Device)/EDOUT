@@ -1,3 +1,0 @@
-../Application/Source\MApp.c:458:warning:C1801 Implicit parameter-declaration for 'App_StartRooter'
-../Application/Source\MApp.c:458:warning:C2705 Possible loss of data
-../Application/Source\MApp.c:554:error:C2801 '}' missing
