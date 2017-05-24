@@ -63,6 +63,9 @@ static void GenandTransData(uint8_t Length, uint8_t* pTxData, uint8_t* dest_addr
 
 static void count_timer  (uint8_t timerId);
 
+/* added by yusk */
+static void App_TransmitUartData(void);
+
 volatile static uint8_t global_counter;
 
 static void count_timer(uint8_t timerId){
@@ -478,6 +481,7 @@ void AppTask(event_t events)
     }
     break; 
     
+  /* added by yusk */
   case Rooter_stateListen:
     /* Stay in this state forever. 
        Transmit the data received on UART */
@@ -578,6 +582,83 @@ static uint8_t App_HandleMlmeInput(nwkMessage_t *pMsg)
 * Private functions
 *************************************************************************************
 ************************************************************************************/
+
+
+/* added by yusk */
+static void App_TransmitUartData(void)
+{   
+  static uint8_t keysBuffer[mMaxKeysToReceive_c];
+  static uint8_t keysReceived = 0;
+  const uint8_t broadcastaddress[8] = { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
+  
+  /* get data from UART */
+  if( keysReceived < mMaxKeysToReceive_c) 
+  { 
+    if(UartX_GetByteFromRxBuffer(&keysBuffer[keysReceived])) 
+    {
+    keysReceived++;
+    }
+  }
+  /* Use multi buffering for increased TX performance. It does not really
+     have any effect at a UART baud rate of 19200bps but serves as an
+     example of how the throughput may be improved in a real-world 
+     application where the data rate is of concern. */
+  if( (mcPendingPackets < mDefaultValueOfMaxPendingDataPackets_c) && (mpPacket == NULL) ) 
+  {
+    /* If the maximum number of pending data buffes is below maximum limit 
+       and we do not have a data buffer already then allocate one. */
+    mpPacket = MSG_Alloc(gMaxRxTxDataLength_c);
+  }
+
+  if(mpPacket != NULL)
+  {
+      /* get data from UART */        
+      mpPacket->msgData.dataReq.pMsdu = (uint8_t*)(&(mpPacket->msgData.dataReq.pMsdu)) + sizeof(uint8_t*);
+      FLib_MemCpy(mpPacket->msgData.dataReq.pMsdu, (uint8_t*) keysBuffer, keysReceived);
+
+      /* Data was available in the UART receive buffer. Now create an
+         MCPS-Data Request message containing the UART data. */
+      mpPacket->msgType = gMcpsDataReq_c;
+      /* Create the header using device information stored when creating 
+         the association response. In this simple example the use of short
+         addresses is hardcoded. In a real world application we must be
+         flexible, and use the address mode required by the given situation. */
+      
+      
+      FLib_MemCpy(mpPacket->msgData.dataReq.dstAddr, (void *)broadcastaddress, 2);
+      FLib_MemCpy(mpPacket->msgData.dataReq.srcAddr, (void *)maShortAddress, 2);
+      FLib_MemCpy(mpPacket->msgData.dataReq.dstPanId, (void *)maPanId, 2);
+      FLib_MemCpy(mpPacket->msgData.dataReq.srcPanId, (void *)maPanId, 2);
+      mpPacket->msgData.dataReq.dstAddrMode = gAddrModeShort_c;
+      mpPacket->msgData.dataReq.srcAddrMode = gAddrModeShort_c;
+      mpPacket->msgData.dataReq.msduLength = keysReceived;
+      /* Request MAC level acknowledgement, and 
+         indirect transmission of the data packet */
+      mpPacket->msgData.dataReq.txOptions = 0;
+      /* Give the data packet a handle. The handle is
+         returned in the MCPS-Data Confirm message. */
+      mpPacket->msgData.dataReq.msduHandle = mMsduHandle++;
+#ifdef gMAC2006_d
+    mpPacket->msgData.dataReq.securityLevel = 0;
+#endif //gMAC2006_d   
+      
+      /* Send the Data Request to the MCPS */
+      (void)MSG_Send(NWK_MCPS, mpPacket);
+      /* Prepare for another data buffer */
+      mpPacket = NULL;
+      mcPendingPackets++;
+      /* Receive another pressed keys */
+      keysReceived = 0;
+  }
+  
+  /* If the keysBuffer[] wasn't send over the air because there are too many pending packets, */
+  /* try to send it later   */
+  if (keysReceived)
+  {
+  TS_SendEvent(gAppTaskID_c, gAppEvtRxFromUart_c);
+  }
+}
 
 
 /******************************************************************************
