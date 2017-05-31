@@ -324,3 +324,3096 @@ ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
   259:    
   260:  }
   0094 8d       [7]             RTC   
+  261:  
+  262:  /*****************************************************************************
+  263:  *Mac Application Task event processor.  This function is called to
+  264:  * process all events for the task. Events include timers, messages and any
+  265:  * other user defined events
+  266:  *
+  267:  * Interface assumptions: None
+  268:  *
+  269:  * Return value: None
+  270:  *****************************************************************************/
+  271:  void AppTask(event_t events) 
+  272:  { 
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 a7fe     [2]             AIS   #-2
+  273:  
+  274:    /* Pointer for storing the messages from MLME, MCPS, and ASP. */
+  275:    void *pMsgIn;
+  276:    /* Stores the status code returned by some functions. */
+  277:    uint8_t rc;
+  278:    pMsgIn = NULL;
+  0004 9e6f02   [6]             CLR   2,SP
+  0007 9e6f01   [6]             CLR   1,SP
+  279:    
+  280:    /* Dequeue the MLME message */
+  281:    if (events & gAppEvtMessageFromMLME_c)
+  000a 9f       [1]             TXA   
+  000b a504     [2]             BIT   #4
+  000d 2726     [3]             BEQ   L35 ;abs = 0035
+  282:    {
+  283:      /* Get the message from MLME */
+  284:      pMsgIn = MSG_DeQueue(&mMlmeNwkInputQueue);
+  000f 450000   [3]             LDHX  @mMlmeNwkInputQueue
+  0012 ac000000 [8]             CALL  List_RemoveHead
+  0016 9eff01   [5]             STHX  1,SP
+  285:      
+  286:      /* Any time a beacon might arrive. Always handle the beacon frame first */
+  287:      if (pMsgIn)
+  0019 271a     [3]             BEQ   L35 ;abs = 0035
+  288:      {               
+  289:        rc = App_WaitMsg(pMsgIn, gNwkBeaconNotifyInd_c);
+  001b a604     [2]             LDA   #4
+  001d ac000000 [8]             CALL  App_WaitMsg
+  290:        if(rc == errorNoError)
+  0021 4d       [1]             TSTA  
+  0022 2611     [3]             BNE   L35 ;abs = 0035
+  291:        {
+  292:          /* ALWAYS free the beacon frame contained in the beacon notify indication.*/
+  293:          /* ALSO the application can use the beacon payload.*/
+  294:          MSG_Free(((nwkMessage_t *)pMsgIn)->msgData.beaconNotifyInd.pBufferRoot);
+  0024 9efe01   [5]             LDHX  1,SP
+  0027 9ece0a   [5]             LDHX  10,X
+  002a ac000000 [8]             CALL  MM_Free
+  295:          UartUtil_Print("Received an MLME-Beacon Notify Indication\n\r", gAllowToBlock_d);
+  002e 450000   [3]             LDHX  @"Received an MLME-Beacon Notify Indication\012\015"
+  0031 ac000339 [8]             CALL  AppTask:825
+  0035          L35:    
+  296:        }
+  297:      }
+  298:    }
+  299:    /* The application state machine */
+  300:    switch(gState)
+  0035 c60000   [4]             LDA   gState
+  0038 a10b     [2]             CMP   #11
+  003a 2249     [3]             BHI   L85 ;abs = 0085
+  003c 4d       [1]             TSTA  
+  003d 2749     [3]             BEQ   L88 ;abs = 0088
+  003f 410152   [4]             CBEQA #1,L94 ;abs = 0094
+  0042 a102     [2]             CMP   #2
+  0044 2766     [3]             BEQ   LAC ;abs = 00ac
+  0046 a103     [2]             CMP   #3
+  0048 2603     [3]             BNE   L4D ;abs = 004d
+  004a cc014e   [4]             JMP   L14E ;abs = 014e
+  004d          L4D:    
+  004d a104     [2]             CMP   #4
+  004f 2603     [3]             BNE   L54 ;abs = 0054
+  0051 cc0170   [4]             JMP   L170 ;abs = 0170
+  0054          L54:    
+  0054 a105     [2]             CMP   #5
+  0056 2603     [3]             BNE   L5B ;abs = 005b
+  0058 cc01ee   [4]             JMP   L1EE ;abs = 01ee
+  005b          L5B:    
+  005b a106     [2]             CMP   #6
+  005d 2603     [3]             BNE   L62 ;abs = 0062
+  005f cc0218   [4]             JMP   L218 ;abs = 0218
+  0062          L62:    
+  0062 a107     [2]             CMP   #7
+  0064 2603     [3]             BNE   L69 ;abs = 0069
+  0066 cc0224   [4]             JMP   L224 ;abs = 0224
+  0069          L69:    
+  0069 a108     [2]             CMP   #8
+  006b 2603     [3]             BNE   L70 ;abs = 0070
+  006d cc0237   [4]             JMP   L237 ;abs = 0237
+  0070          L70:    
+  0070 a109     [2]             CMP   #9
+  0072 2603     [3]             BNE   L77 ;abs = 0077
+  0074 cc025f   [4]             JMP   L25F ;abs = 025f
+  0077          L77:    
+  0077 a10a     [2]             CMP   #10
+  0079 2603     [3]             BNE   L7E ;abs = 007e
+  007b cc0289   [4]             JMP   L289 ;abs = 0289
+  007e          L7E:    
+  007e a10b     [2]             CMP   #11
+  0080 2603     [3]             BNE   L85 ;abs = 0085
+  0082 cc02d2   [4]             JMP   L2D2 ;abs = 02d2
+  0085          L85:    
+  0085 cc014b   [4]             JMP   L14B ;abs = 014b
+  0088          L88:    
+  301:    {
+  302:    case stateInit:    
+  303:      /* Print a welcome message to the UART */
+  304:      UartUtil_Print("\n\rMyWirelessApp Demo Beacon End Device application is initialized and ready.\n\r\n\r", gAllowToBlock_d);            
+  0088 450000   [3]             LDHX  @"\012\015MyWirelessApp Demo Beacon End Device application is initialized and ready.\012\015\012\015"
+  008b ac000339 [8]             CALL  AppTask:825
+  305:      /* Goto Active Scan state. */
+  306:      gState = stateScanActiveStart;
+  008f a601     [2]             LDA   #1
+  307:      //gState = stateListen;
+  308:      TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+  309:      break;
+  0091 cc0141   [4]             JMP   L141 ;abs = 0141
+  0094          L94:    
+  310:      
+  311:    case stateScanActiveStart:
+  312:      /* Start the Active scan, and goto wait for confirm state. */
+  313:      UartUtil_Print("Start scanning for a PAN coordinator\n\r", gAllowToBlock_d);
+  0094 450000   [3]             LDHX  @"Start scanning for a PAN coordinator\012\015"
+  0097 ac000339 [8]             CALL  AppTask:825
+  314:      /*print a message on the LCD also*/
+  315:      LCD_ClearDisplay();
+  316:      LCD_WriteString(1,"Start scanning");
+  317:      LCD_WriteString(2,"for coordinator");
+  318:      rc = App_StartScan(gScanModeActive_c);
+  009b a601     [2]             LDA   #1
+  009d ac000000 [8]             CALL  App_StartScan
+  319:      if(rc == errorNoError)
+  00a1 4d       [1]             TSTA  
+  00a2 2703     [3]             BEQ   LA7 ;abs = 00a7
+  00a4 cc014b   [4]             JMP   L14B ;abs = 014b
+  00a7          LA7:    
+  320:      {
+  321:        gState = stateScanActiveWaitConfirm;
+  00a7 a602     [2]             LDA   #2
+  00a9 cc016d   [4]             JMP   L16D ;abs = 016d
+  00ac          LAC:    
+  322:      }
+  323:      break;
+  324:      
+  325:    case stateScanActiveWaitConfirm:
+  326:      /* Stay in this state until the Scan confirm message
+  327:         arrives, and then goto the associate state. */
+  328:      if (events & gAppEvtMessageFromMLME_c)
+  00ac 95       [2]             TSX   
+  00ad e603     [3]             LDA   3,X
+  00af a504     [2]             BIT   #4
+  00b1 2603     [3]             BNE   LB6 ;abs = 00b6
+  00b3 cc014b   [4]             JMP   L14B ;abs = 014b
+  00b6          LB6:    
+  329:      {
+  330:        if (pMsgIn)
+  00b6 9efe01   [5]             LDHX  1,SP
+  00b9 2603     [3]             BNE   LBE ;abs = 00be
+  00bb cc014b   [4]             JMP   L14B ;abs = 014b
+  00be          LBE:    
+  331:        {                            
+  332:          rc = App_WaitMsg(pMsgIn, gNwkScanCnf_c);
+  00be a60b     [2]             LDA   #11
+  00c0 ac000000 [8]             CALL  App_WaitMsg
+  333:          if(rc == errorNoError)
+  00c4 4d       [1]             TSTA  
+  00c5 2703     [3]             BEQ   LCA ;abs = 00ca
+  00c7 cc014b   [4]             JMP   L14B ;abs = 014b
+  00ca          LCA:    
+  334:          {
+  335:            rc = App_HandleScanActiveConfirm(pMsgIn);
+  00ca 9efe01   [5]             LDHX  1,SP
+  00cd ac000000 [8]             CALL  App_HandleScanActiveConfirm
+  336:            if(rc == errorNoError)
+  00d1 4d       [1]             TSTA  
+  00d2 2670     [3]             BNE   L144 ;abs = 0144
+  337:            {
+  338:              UartUtil_Print("Found a coordinator with the following properties:\n\r", gAllowToBlock_d);
+  00d4 450000   [3]             LDHX  @"Found a coordinator with the following properties:\012\015"
+  00d7 ac000339 [8]             CALL  AppTask:825
+  339:              UartUtil_Print("----------------------------------------------------", gAllowToBlock_d);
+  00db 450000   [3]             LDHX  @"----------------------------------------------------"
+  00de ac000339 [8]             CALL  AppTask:825
+  340:              UartUtil_Print("\n\rAddress............0x", gAllowToBlock_d); UartUtil_PrintHex(mCoordInfo.coordAddress, 
+  00e2 450000   [3]             LDHX  @"\012\015Address............0x"
+  00e5 ac000339 [8]             CALL  AppTask:825
+  00e9 450000   [3]             LDHX  @mCoordInfo
+  00ec 89       [2]             PSHX  
+  00ed 8b       [2]             PSHH  
+  00ee c6000a   [4]             LDA   mCoordInfo:10
+  00f1 410203   [4]             CBEQA #2,LF7 ;abs = 00f7
+  341:                                                                   mCoordInfo.coordAddrMode == gAddrModeShort_c ? 2 : 8, 0);
+  00f4 ae08     [2]             LDX   #8
+  00f6 65       [3]             SKIP2 LF9 ;abs = 00f9
+  00f7          LF7:    
+  00f7 ae02     [2]             LDX   #2
+  00f9          LF9:    
+  00f9 4f       [1]             CLRA  
+  00fa ac000000 [8]             CALL  UartUtil_PrintHex
+  00fe a702     [2]             AIS   #2
+  342:              UartUtil_Print("\n\rPAN ID.............0x", gAllowToBlock_d); UartUtil_PrintHex(mCoordInfo.coordPanId, 2, 0);
+  0100 450000   [3]             LDHX  @"\012\015PAN ID.............0x"
+  0103 ac000339 [8]             CALL  AppTask:825
+  0107 450008   [3]             LDHX  @mCoordInfo:8
+  010a ac000340 [8]             CALL  AppTask:832
+  343:              UartUtil_Print("\n\rLogical Channel....0x", gAllowToBlock_d); UartUtil_PrintHex(&mCoordInfo.logicalChannel, 1, 0);
+  010e 450000   [3]             LDHX  @"\012\015Logical Channel....0x"
+  0111 ac000339 [8]             CALL  AppTask:825
+  0115 45000b   [3]             LDHX  @mCoordInfo:11
+  0118 ac00034c [8]             CALL  AppTask:844
+  344:              UartUtil_Print("\n\rBeacon Spec........0x", gAllowToBlock_d); UartUtil_PrintHex(mCoordInfo.superFrameSpec, 2, 0);
+  011c 450000   [3]             LDHX  @"\012\015Beacon Spec........0x"
+  011f ac000339 [8]             CALL  AppTask:825
+  0123 45000f   [3]             LDHX  @mCoordInfo:15
+  0126 ac000340 [8]             CALL  AppTask:832
+  345:              UartUtil_Print("\n\rLink Quality.......0x", gAllowToBlock_d); UartUtil_PrintHex(&mCoordInfo.linkQuality, 1, 0);
+  012a 450000   [3]             LDHX  @"\012\015Link Quality.......0x"
+  012d ac000339 [8]             CALL  AppTask:825
+  0131 450012   [3]             LDHX  @mCoordInfo:18
+  0134 ac00034c [8]             CALL  AppTask:844
+  346:              UartUtil_Print("\n\r\n\r", gAllowToBlock_d);
+  0138 450000   [3]             LDHX  @"\012\015\012\015"
+  013b ac000339 [8]             CALL  AppTask:825
+  347:  
+  348:              /* Go to the Associate state */
+  349:              gState = stateAssociate;
+  013f a603     [2]             LDA   #3
+  0141          L141:   
+  350:              TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+  351:            }
+  0141 cc01cf   [4]             JMP   L1CF ;abs = 01cf
+  0144          L144:   
+  352:            else
+  353:            {
+  354:              UartUtil_Print("Scan did not find a suitable coordinator\n\r", gAllowToBlock_d);
+  0144 450000   [3]             LDHX  @"Scan did not find a suitable coordinator\012\015"
+  0147 ac000339 [8]             CALL  AppTask:825
+  014b          L14B:   
+  014b cc0216   [4]             JMP   L216 ;abs = 0216
+  014e          L14E:   
+  355:              /*print a message on the LCD also*/
+  356:              LCD_ClearDisplay();
+  357:              LCD_WriteString(1,"No coordinator");
+  358:              LCD_WriteString(2,"found");
+  359:            }            
+  360:          }
+  361:        }
+  362:      }
+  363:      break;
+  364:  
+  365:    case stateAssociate:
+  366:      /* Associate to the PAN coordinator */
+  367:      UartUtil_Print("Associating to PAN coordinator on channel 0x", gAllowToBlock_d);
+  014e 450000   [3]             LDHX  @"Associating to PAN coordinator on channel 0x"
+  0151 ac000339 [8]             CALL  AppTask:825
+  368:      UartUtil_PrintHex(&(mCoordInfo.logicalChannel), 1, gPrtHexNewLine_c);
+  0155 45000b   [3]             LDHX  @mCoordInfo:11
+  0158 89       [2]             PSHX  
+  0159 8b       [2]             PSHH  
+  015a ae01     [2]             LDX   #1
+  015c a602     [2]             LDA   #2
+  015e ac000000 [8]             CALL  UartUtil_PrintHex
+  0162 a702     [2]             AIS   #2
+  369:      /*print a message on the LCD also*/
+  370:      LCD_ClearDisplay();
+  371:      LCD_WriteString(1,"Associating to ");
+  372:      LCD_WriteString(2,"PAN coordinator");
+  373:  
+  374:      rc = App_SendAssociateRequest();
+  0164 ac000000 [8]             CALL  App_SendAssociateRequest
+  375:      if(rc == errorNoError)
+  0168 4d       [1]             TSTA  
+  0169 266b     [3]             BNE   L1D6 ;abs = 01d6
+  376:        gState = stateAssociateWaitConfirm;
+  016b a604     [2]             LDA   #4
+  016d          L16D:   
+  016d cc0235   [4]             JMP   L235 ;abs = 0235
+  0170          L170:   
+  377:      break; 
+  378:  
+  379:    case stateAssociateWaitConfirm:
+  380:      /* Stay in this state until the Associate confirm message
+  381:         arrives, and then goto the Listen state. */
+  382:      if (events & gAppEvtMessageFromMLME_c)
+  0170 95       [2]             TSX   
+  0171 e603     [3]             LDA   3,X
+  0173 a504     [2]             BIT   #4
+  0175 2603     [3]             BNE   L17A ;abs = 017a
+  0177 cc0210   [4]             JMP   L210 ;abs = 0210
+  017a          L17A:   
+  383:      {
+  384:        if (pMsgIn)
+  017a 9efe01   [5]             LDHX  1,SP
+  017d 2603     [3]             BNE   L182 ;abs = 0182
+  017f cc0210   [4]             JMP   L210 ;abs = 0210
+  0182          L182:   
+  385:        {   
+  386:          rc = App_WaitMsg(pMsgIn, gNwkAssociateCnf_c);    
+  0182 a601     [2]             LDA   #1
+  0184 ac000000 [8]             CALL  App_WaitMsg
+  387:          if(rc == errorNoError)
+  0188 4d       [1]             TSTA  
+  0189 264b     [3]             BNE   L1D6 ;abs = 01d6
+  388:          {
+  389:            rc = App_HandleAssociateConfirm(pMsgIn);
+  018b 9efe01   [5]             LDHX  1,SP
+  018e ac000000 [8]             CALL  App_HandleAssociateConfirm
+  390:            if (rc == errorNoError)
+  0192 4d       [1]             TSTA  
+  0193 264e     [3]             BNE   L1E3 ;abs = 01e3
+  391:            {
+  392:                UartUtil_Print("Successfully associated with the coordinator.\n\r", gAllowToBlock_d);
+  0195 450000   [3]             LDHX  @"Successfully associated with the coordinator.\012\015"
+  0198 ac000339 [8]             CALL  AppTask:825
+  393:                UartUtil_Print("We were assigned the short address 0x", gAllowToBlock_d);
+  019c 450000   [3]             LDHX  @"We were assigned the short address 0x"
+  019f ac000339 [8]             CALL  AppTask:825
+  394:                UartUtil_PrintHex(maMyAddress, mAddrMode == gAddrModeShort_c ? 2 : 8, 0);
+  01a3 450000   [3]             LDHX  @maMyAddress
+  01a6 89       [2]             PSHX  
+  01a7 8b       [2]             PSHH  
+  01a8 c60000   [4]             LDA   mAddrMode
+  01ab 410203   [4]             CBEQA #2,L1B1 ;abs = 01b1
+  01ae ae08     [2]             LDX   #8
+  01b0 65       [3]             SKIP2 L1B3 ;abs = 01b3
+  01b1          L1B1:   
+  01b1 ae02     [2]             LDX   #2
+  01b3          L1B3:   
+  01b3 4f       [1]             CLRA  
+  01b4 ac000000 [8]             CALL  UartUtil_PrintHex
+  01b8 a702     [2]             AIS   #2
+  395:                UartUtil_Print("\n\r\n\rReady to send and receive data over the UART.\n\r\n\r", gAllowToBlock_d);
+  01ba 450000   [3]             LDHX  @"\012\015\012\015Ready to send and receive data over the UART.\012\015\012\015"
+  01bd ac000339 [8]             CALL  AppTask:825
+  396:                /*print a message on the LCD also*/
+  397:                LCD_ClearDisplay();
+  398:                LCD_WriteString(1,"Ready to send");
+  399:                LCD_WriteString(2,"and receive data");      
+  400:                
+  401:  //********************************************************
+  402:                if (maMyAddress[1]==0x01){
+  01c1 c60001   [4]             LDA   maMyAddress:1
+  01c4 4b0b     [4]             DBNZA L1D1 ;abs = 01d1
+  403:              	  UartUtil_Print("\n\rSwitch Role to Rooter\n\r", gAllowToBlock_d);
+  01c6 450000   [3]             LDHX  @"\012\015Switch Role to Rooter\012\015"
+  01c9 ac000339 [8]             CALL  AppTask:825
+  404:              	  gState = stateListen;
+  01cd a605     [2]             LDA   #5
+  01cf          L1CF:   
+  405:              	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+  406:                }else if(maMyAddress[1]==0x02){
+  01cf 2050     [3]             BRA   L221 ;abs = 0221
+  01d1          L1D1:   
+  01d1 c60001   [4]             LDA   maMyAddress:1
+  01d4 a102     [2]             CMP   #2
+  01d6          L1D6:   
+  01d6 263e     [3]             BNE   L216 ;abs = 0216
+  407:              	  UartUtil_Print("\n\rSwitch Role to End-Device\n\r", gAllowToBlock_d);
+  01d8 450000   [3]             LDHX  @"\012\015Switch Role to End-Device\012\015"
+  01db ac000339 [8]             CALL  AppTask:825
+  408:              	  gState = stateStartRooter;
+  01df a609     [2]             LDA   #9
+  01e1 203e     [3]             BRA   L221 ;abs = 0221
+  01e3          L1E3:   
+  409:              	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+  410:                }
+  411:  //********************************************************
+  412:            } 
+  413:            else 
+  414:            {
+  415:            
+  416:          	  UartUtil_Print("\n\rAssociate Confirm wasn't successful... \n\r\n\r", gAllowToBlock_d);
+  01e3 450000   [3]             LDHX  @"\012\015Associate Confirm wasn't successful... \012\015\012\015"
+  01e6 ac000339 [8]             CALL  AppTask:825
+  417:          	  gState = stateInitRooter;
+  01ea a606     [2]             LDA   #6
+  01ec 2033     [3]             BRA   L221 ;abs = 0221
+  01ee          L1EE:   
+  418:          	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+  419:            }
+  420:          }
+  421:        }
+  422:      }
+  423:      break; 
+  424:          
+  425:    case stateListen:
+  426:      /* Transmit to coordinator data received from UART. */
+  427:      if (events & gAppEvtMessageFromMLME_c)
+  01ee 95       [2]             TSX   
+  01ef e603     [3]             LDA   3,X
+  01f1 a504     [2]             BIT   #4
+  01f3 2709     [3]             BEQ   L1FE ;abs = 01fe
+  428:      {  
+  429:        if (pMsgIn)
+  01f5 9efe01   [5]             LDHX  1,SP
+  01f8 2704     [3]             BEQ   L1FE ;abs = 01fe
+  430:        {  
+  431:          /* Process it */
+  432:          rc = App_HandleMlmeInput(pMsgIn);
+  01fa ac000000 [8]             CALL  App_HandleMlmeInput
+  01fe          L1FE:   
+  433:        }
+  434:      } 
+  435:      
+  436:  
+  437:  #if gMPL3115A2_enable    
+  438:      MPL3115A2_dump(events);
+  439:  #endif
+  440:    
+  441:  #if gMMA8652_enable    
+  442:  	// Start to receive periodical data 
+  443:  	if(MMA8652_start_flag){
+  01fe c60000   [4]             LDA   MMA8652_start_flag
+  0201 2708     [3]             BEQ   L20B ;abs = 020b
+  444:  		MMA8652_start_flag = 0;
+  0203 4f       [1]             CLRA  
+  0204 c70000   [4]             STA   MMA8652_start_flag
+  445:  		MMA8652_Start_Periodical_data();
+  0207 ac000000 [8]             CALL  MMA8652_Start_Periodical_data
+  020b          L20B:   
+  446:  	}
+  447:  	
+  448:  	if (events & gAppEvt_FromMMA8652_c){
+  020b 95       [2]             TSX   
+  020c e602     [3]             LDA   2,X
+  020e a502     [2]             BIT   #2
+  0210          L210:   
+  0210 2775     [3]             BEQ   L287 ;abs = 0287
+  449:  		/* get byte from UART */
+  450:  		App_TransmitSensorData();
+  0212 ac000000 [8]             CALL  App_TransmitSensorData
+  0216          L216:   
+  0216 206f     [3]             BRA   L287 ;abs = 0287
+  0218          L218:   
+  451:  	}
+  452:      //MMA8652_dump(events);
+  453:  #endif
+  454:      
+  455:  #if gMAG3110_enable    
+  456:      MAG3110_dump(events);
+  457:  #endif
+  458:      
+  459:  #if gFXAS21000_enable    
+  460:      FXAS21000_dump(events);
+  461:  #endif
+  462:      
+  463:  #if gMMA9553_enable    
+  464:      MMA9553_dump(events);
+  465:  #endif
+  466:      
+  467:      break;
+  468:      
+  469:    case stateInitRooter:
+  470:       /* Print a welcome message to the UART */
+  471:      UartUtil_Print(" MyWirelessApp Demo Beacon Coordinator application is initialized and ready.\n\r\n\r", gAllowToBlock_d);            
+  0218 450000   [3]             LDHX  @" MyWirelessApp Demo Beacon Coordinator application is initialized and ready.\012\015\012\015"
+  021b ac000339 [8]             CALL  AppTask:825
+  472:      /* Goto Energy Detection state. */
+  473:      gState = stateScanEdStart;
+  021f a607     [2]             LDA   #7
+  0221          L221:   
+  474:      TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);    
+  475:      break;
+  0221 cc02c3   [4]             JMP   L2C3 ;abs = 02c3
+  0224          L224:   
+  476:      
+  477:    case stateScanEdStart:
+  478:        /* Start the Energy Detection scan, and goto wait for confirm state. */
+  479:        UartUtil_Print("Initiating the Energy Detection Scan\n\r", gAllowToBlock_d);
+  0224 450000   [3]             LDHX  @"Initiating the Energy Detection Scan\012\015"
+  0227 ac000339 [8]             CALL  AppTask:825
+  480:        /*Print the message on the LCD also*/
+  481:        LCD_ClearDisplay();
+  482:        LCD_WriteString(1,"Starting Energy");
+  483:        LCD_WriteString(2,"Detection Scan");      
+  484:        rc = App_StartScan(gScanModeED_c);
+  022b 4f       [1]             CLRA  
+  022c ac000000 [8]             CALL  App_StartScan
+  485:        if(rc == errorNoError)
+  0230 4d       [1]             TSTA  
+  0231 2654     [3]             BNE   L287 ;abs = 0287
+  486:        {
+  487:          gState = stateScanEdWaitConfirm;
+  0233 a608     [2]             LDA   #8
+  0235          L235:   
+  0235 204d     [3]             BRA   L284 ;abs = 0284
+  0237          L237:   
+  488:        }
+  489:        break;
+  490:        
+  491:    case stateScanEdWaitConfirm:
+  492:        /* Stay in this state until the MLME Scan confirm message arrives,
+  493:           and has been processed. Then goto Start Coordinator state. */
+  494:        if (events & gAppEvtMessageFromMLME_c)
+  0237 95       [2]             TSX   
+  0238 e603     [3]             LDA   3,X
+  023a a504     [2]             BIT   #4
+  023c 2749     [3]             BEQ   L287 ;abs = 0287
+  495:        {
+  496:          if (pMsgIn)
+  023e 9efe01   [5]             LDHX  1,SP
+  0241 2744     [3]             BEQ   L287 ;abs = 0287
+  497:          {
+  498:            rc = App_WaitMsg(pMsgIn, gNwkScanCnf_c);
+  0243 a60b     [2]             LDA   #11
+  0245 ac000000 [8]             CALL  App_WaitMsg
+  499:            if(rc == errorNoError)
+  0249 4d       [1]             TSTA  
+  024a 263b     [3]             BNE   L287 ;abs = 0287
+  500:            {
+  501:              /* Process the ED scan confirm. The logical
+  502:                 channel is selected by this function. */
+  503:              App_HandleScanEdConfirm(pMsgIn);
+  024c 9efe01   [5]             LDHX  1,SP
+  024f ac000000 [8]             CALL  App_HandleScanEdConfirm
+  504:              /* Go to the Start Coordinator state */
+  505:              gState = stateStartRooter;
+  0253 a609     [2]             LDA   #9
+  0255 c70000   [4]             STA   gState
+  506:              TS_SendEvent(gAppTaskID_c, gAppEvtStartCoordinator_c);
+  0258 c60000   [4]             LDA   gAppTaskID_c
+  025b ae10     [2]             LDX   #16
+  025d 206c     [3]             BRA   L2CB ;abs = 02cb
+  025f          L25F:   
+  507:            }
+  508:          }
+  509:        }
+  510:        break;
+  511:    
+  512:    case stateStartRooter:
+  513:      if (events & gAppEvtStartCoordinator_c)
+  025f 95       [2]             TSX   
+  0260 e603     [3]             LDA   3,X
+  0262 a510     [2]             BIT   #16
+  0264 2721     [3]             BEQ   L287 ;abs = 0287
+  514:      {
+  515:        /* Start up as a PAN Coordinator on the selected channel. */
+  516:        UartUtil_Print("\n\rStarting as PAN Rooter on channel 0x", gAllowToBlock_d);
+  0266 450000   [3]             LDHX  @"\012\015Starting as PAN Rooter on channel 0x"
+  0269 ac000339 [8]             CALL  AppTask:825
+  517:        UartUtil_PrintHex(&mLogicalChannel, 1, FALSE);
+  026d 450000   [3]             LDHX  @mLogicalChannel
+  0270 ac00034c [8]             CALL  AppTask:844
+  518:        UartUtil_Print("\n\r", gAllowToBlock_d);
+  0274 450000   [3]             LDHX  @"\012\015"
+  0277 ac000339 [8]             CALL  AppTask:825
+  519:        /*print a message on the LCD also*/
+  520:        LCD_ClearDisplay();
+  521:        LCD_WriteString(1,"Starting");
+  522:        LCD_WriteString(2,"PAN Rooter");
+  523:        rc = App_StartRooter();
+  027b ac000000 [8]             CALL  App_StartRooter
+  524:        if(rc == errorNoError)
+  027f 4d       [1]             TSTA  
+  0280 266b     [3]             BNE   L2ED ;abs = 02ed
+  525:        {
+  526:          /* If the Start request was sent successfully to
+  527:             the MLME, then goto Wait for confirm state. */
+  528:          gState = stateStartRooterWaitConfirm;
+  0282 a60a     [2]             LDA   #10
+  0284          L284:   
+  0284 c70000   [4]             STA   gState
+  0287          L287:   
+  0287 2064     [3]             BRA   L2ED ;abs = 02ed
+  0289          L289:   
+  529:        }
+  530:      }
+  531:      break; 
+  532:      
+  533:    case stateStartRooterWaitConfirm:
+  534:      /* Stay in this state until the Start confirm message
+  535:         arrives, and then goto the Listen state. */
+  536:      if (events & gAppEvtMessageFromMLME_c)
+  0289 95       [2]             TSX   
+  028a e603     [3]             LDA   3,X
+  028c a504     [2]             BIT   #4
+  028e 275d     [3]             BEQ   L2ED ;abs = 02ed
+  537:      {
+  538:        if (pMsgIn)
+  0290 9efe01   [5]             LDHX  1,SP
+  0293 2758     [3]             BEQ   L2ED ;abs = 02ed
+  539:        {    
+  540:          rc = App_WaitMsg(pMsgIn, gNwkStartCnf_c);
+  0295 a60e     [2]             LDA   #14
+  0297 ac000000 [8]             CALL  App_WaitMsg
+  541:          if(rc == errorNoError)
+  029b 4d       [1]             TSTA  
+  029c 264f     [3]             BNE   L2ED ;abs = 02ed
+  542:          {
+  543:            UartUtil_Print("Started the Rooter with PAN ID 0x", gAllowToBlock_d);
+  029e 450000   [3]             LDHX  @"Started the Rooter with PAN ID 0x"
+  02a1 ac000339 [8]             CALL  AppTask:825
+  544:            UartUtil_PrintHex((uint8_t *)maPanId, 2, 0);
+  02a5 450000   [3]             LDHX  @maPanId
+  02a8 ac000340 [8]             CALL  AppTask:832
+  545:            UartUtil_Print(", and short address 0x", gAllowToBlock_d);
+  02ac 450000   [3]             LDHX  @", and short address 0x"
+  02af ac000339 [8]             CALL  AppTask:825
+  546:            UartUtil_PrintHex((uint8_t *)maShortAddress, 2, 0);
+  02b3 450000   [3]             LDHX  @maShortAddress
+  02b6 ac000340 [8]             CALL  AppTask:832
+  547:            UartUtil_Print(".\n\r\n\rReady to send and receive data over the UART.\n\r\n\r", gAllowToBlock_d);
+  02ba 450000   [3]             LDHX  @".\012\015\012\015Ready to send and receive data over the UART.\012\015\012\015"
+  02bd ac000339 [8]             CALL  AppTask:825
+  548:            /*print a message on the LCD also*/
+  549:            LCD_ClearDisplay();
+  550:            LCD_WriteString(1,"Ready to send");
+  551:            LCD_WriteString(2,"and receive data");
+  552:            gState = stateRooterListen;
+  02c1 a60b     [2]             LDA   #11
+  02c3          L2C3:   
+  02c3 c70000   [4]             STA   gState
+  553:            TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+  02c6 c60000   [4]             LDA   gAppTaskID_c
+  02c9 ae01     [2]             LDX   #1
+  02cb          L2CB:   
+  02cb 8c       [1]             CLRH  
+  02cc ac000000 [8]             CALL  TS_SendEvent
+  02d0 201b     [3]             BRA   L2ED ;abs = 02ed
+  02d2          L2D2:   
+  554:          }
+  555:        }
+  556:      }
+  557:      break; 
+  558:      
+  559:    /* added by yusk */
+  560:    case stateRooterListen:
+  561:      /* Stay in this state forever. 
+  562:         Transmit the data received on UART */
+  563:      if (events & gAppEvtMessageFromMLME_c)
+  02d2 95       [2]             TSX   
+  02d3 e603     [3]             LDA   3,X
+  02d5 a504     [2]             BIT   #4
+  02d7 2709     [3]             BEQ   L2E2 ;abs = 02e2
+  564:      {
+  565:        /* Get the message from MLME */
+  566:        if (pMsgIn)
+  02d9 9efe01   [5]             LDHX  1,SP
+  02dc 2704     [3]             BEQ   L2E2 ;abs = 02e2
+  567:        {      
+  568:          /* Process it */
+  569:          rc = Router_HandleMlmeInput(pMsgIn);
+  02de ac000000 [8]             CALL  Router_HandleMlmeInput
+  02e2          L2E2:   
+  570:          /* Messages from the MLME must always be freed. */
+  571:        }
+  572:      }
+  573:       if (events & gAppEvtRxFromUart_c)
+  02e2 95       [2]             TSX   
+  02e3 e603     [3]             LDA   3,X
+  02e5 a502     [2]             BIT   #2
+  02e7 2704     [3]             BEQ   L2ED ;abs = 02ed
+  574:      {      
+  575:        /* get byte from UART */
+  576:        Router_TransmitUartData();
+  02e9 ac000000 [8]             CALL  Router_TransmitUartData
+  02ed          L2ED:   
+  577:      
+  578:      }  
+  579:      break;     
+  580:    }
+  581:    
+  582:    if (pMsgIn)
+  02ed 9efe01   [5]             LDHX  1,SP
+  02f0 2704     [3]             BEQ   L2F6 ;abs = 02f6
+  583:    {
+  584:      /* Messages must always be freed. */ 
+  585:      MSG_Free(pMsgIn);
+  02f2 ac000000 [8]             CALL  MM_Free
+  02f6          L2F6:   
+  586:    }
+  587:    
+  588:     /* Handle MCPS confirms and transmit data from UART */
+  589:    if (events & gAppEvtMessageFromMCPS_c)
+  02f6 95       [2]             TSX   
+  02f7 e603     [3]             LDA   3,X
+  02f9 a508     [2]             BIT   #8
+  02fb 271b     [3]             BEQ   L318 ;abs = 0318
+  590:    {      
+  591:      /* Get the message from MCPS */
+  592:      pMsgIn = MSG_DeQueue(&mMcpsNwkInputQueue);
+  02fd 450000   [3]             LDHX  @mMcpsNwkInputQueue
+  0300 ac000000 [8]             CALL  List_RemoveHead
+  593:      if (pMsgIn)
+  0304 650000   [3]             CPHX  #0
+  0307 270f     [3]             BEQ   L318 ;abs = 0318
+  594:      {              
+  595:        /* Process it */
+  596:        App_HandleMcpsInput(pMsgIn);
+  0309 89       [2]             PSHX  
+  030a 8b       [2]             PSHH  
+  030b ac000000 [8]             CALL  App_HandleMcpsInput
+  597:        /* Messages from the MCPS must always be freed. */
+  598:        MSG_Free(pMsgIn);
+  030f 9efe01   [5]             LDHX  1,SP
+  0312 ac000000 [8]             CALL  MM_Free
+  0316 a702     [2]             AIS   #2
+  0318          L318:   
+  599:      }
+  600:    }
+  601:    
+  602:    /* Check for pending messages in the Queue */ 
+  603:    if(MSG_Pending(&mMcpsNwkInputQueue))
+  0318 320000   [5]             LDHX  mMcpsNwkInputQueue
+  031b 270a     [3]             BEQ   L327 ;abs = 0327
+  604:      TS_SendEvent(gAppTaskID_c, gAppEvtMessageFromMCPS_c);
+  031d c60000   [4]             LDA   gAppTaskID_c
+  0320 ae08     [2]             LDX   #8
+  0322 8c       [1]             CLRH  
+  0323 ac000000 [8]             CALL  TS_SendEvent
+  0327          L327:   
+  605:    if(MSG_Pending(&mMlmeNwkInputQueue))
+  0327 320000   [5]             LDHX  mMlmeNwkInputQueue
+  032a 270a     [3]             BEQ   L336 ;abs = 0336
+  606:      TS_SendEvent(gAppTaskID_c, gAppEvtMessageFromMLME_c);  
+  032c c60000   [4]             LDA   gAppTaskID_c
+  032f ae04     [2]             LDX   #4
+  0331 8c       [1]             CLRH  
+  0332 ac000000 [8]             CALL  TS_SendEvent
+  0336          L336:   
+  607:  }
+  0336 a704     [2]             AIS   #4
+  0338 8d       [7]             RTC   
+  0339          L339:   
+  0339 a601     [2]             LDA   #1
+  033b ac000000 [8]             CALL  UartUtil_Print
+  033f 8d       [7]             RTC   
+  0340          L340:   
+  0340 89       [2]             PSHX  
+  0341 8b       [2]             PSHH  
+  0342 ae02     [2]             LDX   #2
+  0344 4f       [1]             CLRA  
+  0345 ac000000 [8]             CALL  UartUtil_PrintHex
+  0349 a702     [2]             AIS   #2
+  034b 8d       [7]             RTC   
+  034c          L34C:   
+  034c 89       [2]             PSHX  
+  034d 8b       [2]             PSHH  
+  034e ae01     [2]             LDX   #1
+  0350 4f       [1]             CLRA  
+  0351 ac000000 [8]             CALL  UartUtil_PrintHex
+  0355 a702     [2]             AIS   #2
+  0357 8d       [7]             RTC   
+  608:  
+  609:  /************************************************************************************
+  610:  *************************************************************************************
+  611:  * Private functions
+  612:  *************************************************************************************
+  613:  ************************************************************************************/
+  614:  
+  615:  /*****************************************************************************
+  616:  * UartRxCallBack
+  617:  *
+  618:  * This callback is triggered when a new byte is received over the UART
+  619:  *
+  620:  *****************************************************************************/
+  621:  static void UartRxCallBack(void) 
+  622:  {
+  0000 8b       [2]             PSHH  
+  623:    uint8_t pressedKey;
+  624:    if(stateListen == gState){
+  0001 c60000   [4]             LDA   gState
+  0004 a105     [2]             CMP   #5
+  0006 260c     [3]             BNE   L14 ;abs = 0014
+  625:      TS_SendEvent(gAppTaskID_c, gAppEvtRxFromUart_c);
+  0008 c60000   [4]             LDA   gAppTaskID_c
+  000b ae02     [2]             LDX   #2
+  000d 8c       [1]             CLRH  
+  000e ac000000 [8]             CALL  TS_SendEvent
+  626:    }else{
+  627:  	  (void)UartX_GetByteFromRxBuffer(&pressedKey);
+  628:    }
+  629:  }
+  0012 8a       [3]             PULH  
+  0013 8d       [7]             RTC   
+  0014          L14:    
+  0014 95       [2]             TSX   
+  0015 ac000000 [8]             CALL  Uart1_GetByteFromRxBuffer
+  0019 8a       [3]             PULH  
+  001a 8d       [7]             RTC   
+  630:  
+  631:  /******************************************************************************
+  632:  * The App_HandleMlmeInput(nwkMessage_t *pMsg) function will handle various
+  633:  * messages from the MLME, e.g. Beacon notifications; 
+  634:  *
+  635:  * The function may return either of the following values:
+  636:  *   errorNoError:   The message was processed.
+  637:  *   errorNoMessage: The message pointer is NULL.
+  638:  *
+  639:  ******************************************************************************/
+  640:  static uint8_t App_HandleMlmeInput(nwkMessage_t *pMsg)
+  641:  {
+  642:    if(pMsg == NULL)
+  0000 650000   [3]             CPHX  #0
+  0003 2603     [3]             BNE   L8 ;abs = 0008
+  643:      return errorNoMessage;
+  0005 a603     [2]             LDA   #3
+  0007 8d       [7]             RTC   
+  0008          L8:     
+  644:    
+  645:    /* Handle the incoming message. The type determines the sort of processing. */
+  646:    switch(pMsg->msgType)
+  0008 f6       [3]             LDA   ,X
+  0009 a104     [2]             CMP   #4
+  000b 2607     [3]             BNE   L14 ;abs = 0014
+  647:    {
+  648:      case gNwkBeaconNotifyInd_c:   
+  649:        /* Always free pBufferRoot */    
+  650:        MSG_Free(((nwkMessage_t *)pMsg)->msgData.beaconNotifyInd.pBufferRoot);
+  000d 9ece0a   [5]             LDHX  10,X
+  0010 ac000000 [8]             CALL  MM_Free
+  0014          L14:    
+  651:        break;  
+  652:           
+  653:    }
+  654:    return errorNoError;
+  0014 4f       [1]             CLRA  
+  655:  }
+  0015 8d       [7]             RTC   
+  656:  
+  657:  /* added by yusk */
+  658:  static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg)
+  659:  {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  660:    if(pMsg == NULL)
+  0002 650000   [3]             CPHX  #0
+  0005 2604     [3]             BNE   LB ;abs = 000b
+  661:      return errorNoMessage;
+  0007 a603     [2]             LDA   #3
+  0009 2036     [3]             BRA   L41 ;abs = 0041
+  000b          LB:     
+  662:    
+  663:    /* Handle the incoming message. The type determines the sort of processing.*/
+  664:    switch(pMsg->msgType) {
+  000b f6       [3]             LDA   ,X
+  000c 2706     [3]             BEQ   L14 ;abs = 0014
+  000e a10c     [2]             CMP   #12
+  0010 262e     [3]             BNE   L40 ;abs = 0040
+  0012 2012     [3]             BRA   L26 ;abs = 0026
+  0014          L14:    
+  665:    case gNwkAssociateInd_c:
+  666:      UartUtil_Print("Received an MLME-Associate Indication from the MAC\n\r", gAllowToBlock_d);
+  0014 450000   [3]             LDHX  @"Received an MLME-Associate Indication from the MAC\012\015"
+  0017 a601     [2]             LDA   #1
+  0019 ac000000 [8]             CALL  UartUtil_Print
+  667:      /* A device sent us an Associate Request. We must send back a response.  */
+  668:      return Router_SendAssociateResponse(pMsg);
+  001d 9efe01   [5]             LDHX  1,SP
+  0020 ac000000 [8]             CALL  Router_SendAssociateResponse
+  0024 201b     [3]             BRA   L41 ;abs = 0041
+  0026          L26:    
+  669:      break;
+  670:      
+  671:    case gNwkCommStatusInd_c:
+  672:      /* Sent by the MLME after the Association Response has been transmitted. */
+  673:      UartUtil_Print("Received an MLME-Comm-Status Indication from the MAC - status = ", gAllowToBlock_d);
+  0026 450000   [3]             LDHX  @"Received an MLME-Comm-Status Indication from the MAC - status = "
+  0029 a601     [2]             LDA   #1
+  002b ac000000 [8]             CALL  UartUtil_Print
+  674:      UartUtil_PrintHex(&pMsg->msgData.commStatusInd.status, 1, gPrtHexNewLine_c);
+  002f 9efe01   [5]             LDHX  1,SP
+  0032 af15     [2]             AIX   #21
+  0034 89       [2]             PSHX  
+  0035 8b       [2]             PSHH  
+  0036 ae01     [2]             LDX   #1
+  0038 a602     [2]             LDA   #2
+  003a ac000000 [8]             CALL  UartUtil_PrintHex
+  003e a702     [2]             AIS   #2
+  0040          L40:    
+  675:      break;
+  676:    }
+  677:    return errorNoError;
+  0040 4f       [1]             CLRA  
+  0041          L41:    
+  678:  }
+  0041 a702     [2]             AIS   #2
+  0043 8d       [7]             RTC   
+  679:  
+  680:  /* added by yusk */
+  681:  static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
+  682:  {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 a7fc     [2]             AIS   #-4
+  683:    mlmeMessage_t *pMsg;
+  684:    mlmeAssociateRes_t *pAssocRes;
+  685:    
+  686:    static uint8_t nwk_addr;
+  687:   
+  688:    UartUtil_Print("Sending the MLME-Associate Response message to the MAC...", gAllowToBlock_d);
+  0004 450000   [3]             LDHX  @"Sending the MLME-Associate Response message to the MAC..."
+  0007 ac0000ad [8]             CALL  Router_SendAssociateResponse:173
+  689:   
+  690:    /* Allocate a message for the MLME */
+  691:    pMsg = MSG_AllocType(mlmeMessage_t);
+  000b a60f     [2]             LDA   #15
+  000d ac000000 [8]             CALL  MM_Alloc
+  0011 9eff03   [5]             STHX  3,SP
+  692:    if(pMsg != NULL)
+  0014 2603     [3]             BNE   L19 ;abs = 0019
+  0016 cc00a1   [4]             JMP   LA1 ;abs = 00a1
+  0019          L19:    
+  693:    {
+  694:      /* This is a MLME-ASSOCIATE.res command */
+  695:      pMsg->msgType = gMlmeAssociateRes_c;
+  0019 a601     [2]             LDA   #1
+  001b f7       [2]             STA   ,X
+  696:      
+  697:      /* Create the Associate response message data. */
+  698:      pAssocRes = &pMsg->msgData.associateRes;
+  001c af01     [2]             AIX   #1
+  699:      
+  700:      /* Assign a short address to the device. In this example we simply
+  701:         choose 0x0001. Though, all devices and coordinators in a PAN must have
+  702:         different short addresses. However, if a device do not want to use 
+  703:         short addresses at all in the PAN, a short address of 0xFFFE must
+  704:         be assigned to it. */
+  705:      if(pMsgIn->msgData.associateInd.capabilityInfo & gCapInfoAllocAddr_c)
+  001e 9eff01   [5]             STHX  1,SP
+  0021 9efe05   [5]             LDHX  5,SP
+  0024 e60b     [3]             LDA   11,X
+  0026 2a15     [3]             BPL   L3D ;abs = 003d
+  706:      {
+  707:        /* Assign a unique short address less than 0xfffe if the device requests so. */
+  708:        pAssocRes->assocShortAddress[0] = maMyAddress[0];
+  0028 c60000   [4]             LDA   maMyAddress
+  002b 9efe01   [5]             LDHX  1,SP
+  002e e708     [3]             STA   8,X
+  709:        pAssocRes->assocShortAddress[1] = 0x02;
+  0030 a602     [2]             LDA   #2
+  0032 e709     [3]             STA   9,X
+  710:        nwk_addr += 1;
+  0034 450000   [3]             LDHX  @nwk_addr
+  0037 7c       [4]             INC   ,X
+  711:      }
+  0038 9efe01   [5]             LDHX  1,SP
+  003b 200a     [3]             BRA   L47 ;abs = 0047
+  003d          L3D:    
+  712:      else
+  713:      {
+  714:        /* A short address of 0xfffe means that the device is granted access to
+  715:           the PAN (Associate successful) but that long addressing is used.*/
+  716:        pAssocRes->assocShortAddress[0] = 0xFE;
+  003d a6fe     [2]             LDA   #-2
+  003f 9efe01   [5]             LDHX  1,SP
+  0042 e708     [3]             STA   8,X
+  717:        pAssocRes->assocShortAddress[1] = 0xFF;
+  0044 4c       [1]             INCA  
+  0045 e709     [3]             STA   9,X
+  0047          L47:    
+  718:      }
+  719:      /* Get the 64 bit address of the device requesting association. */
+  720:      FLib_MemCpy(pAssocRes->deviceAddress, pMsgIn->msgData.associateInd.deviceAddress, 8);
+  0047 89       [2]             PSHX  
+  0048 8b       [2]             PSHH  
+  0049 9eff03   [5]             STHX  3,SP
+  004c 9efe07   [5]             LDHX  7,SP
+  004f af01     [2]             AIX   #1
+  0051 a608     [2]             LDA   #8
+  0053 ac000000 [8]             CALL  FLib_MemCpy
+  0057 a702     [2]             AIS   #2
+  721:      /* Association granted. May also be gPanAtCapacity_c or gPanAccessDenied_c. */
+  722:      pAssocRes->status = gSuccess_c;
+  0059 9efe01   [5]             LDHX  1,SP
+  005c 6f0b     [5]             CLR   11,X
+  723:      /* Do not use security */
+  724:  #ifndef gMAC2006_d
+  725:      pAssocRes->securityEnable = FALSE;
+  005e 6f0a     [5]             CLR   10,X
+  726:  #else
+  727:    pAssocRes->securityLevel = 0;
+  728:  #endif //gMAC2006_d 
+  729:      
+  730:      /* Save device info. */
+  731:      FLib_MemCpy(maDeviceShortAddress, pAssocRes->assocShortAddress, 2);
+  0060 450000   [3]             LDHX  @maDeviceShortAddress
+  0063 89       [2]             PSHX  
+  0064 8b       [2]             PSHH  
+  0065 9efe03   [5]             LDHX  3,SP
+  0068 af08     [2]             AIX   #8
+  006a a602     [2]             LDA   #2
+  006c ac000000 [8]             CALL  FLib_MemCpy
+  0070 a702     [2]             AIS   #2
+  732:      FLib_MemCpy(maDeviceLongAddress,  pAssocRes->deviceAddress,     8);
+  0072 450000   [3]             LDHX  @maDeviceLongAddress
+  0075 89       [2]             PSHX  
+  0076 8b       [2]             PSHH  
+  0077 9efe03   [5]             LDHX  3,SP
+  007a a608     [2]             LDA   #8
+  007c ac000000 [8]             CALL  FLib_MemCpy
+  0080 a702     [2]             AIS   #2
+  733:      
+  734:      /* Send the Associate Response to the MLME. */
+  735:      if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
+  0082 9efe03   [5]             LDHX  3,SP
+  0085 ac000000 [8]             CALL  NWK_MLME_SapHandler
+  0089 4d       [1]             TSTA  
+  008a 260a     [3]             BNE   L96 ;abs = 0096
+  736:      {
+  737:        UartUtil_Print("Done\n\r", gAllowToBlock_d);
+  008c 450000   [3]             LDHX  @"Done\012\015"
+  008f ac0000ad [8]             CALL  Router_SendAssociateResponse:173
+  738:        return errorNoError;
+  0093 4f       [1]             CLRA  
+  0094 2014     [3]             BRA   LAA ;abs = 00aa
+  0096          L96:    
+  739:      }
+  740:      else
+  741:      {
+  742:        /* One or more parameters in the message were invalid. */
+  743:        UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
+  0096 450000   [3]             LDHX  @"Invalid parameter!\012\015"
+  0099 ac0000ad [8]             CALL  Router_SendAssociateResponse:173
+  744:        return errorInvalidParameter;
+  009d a605     [2]             LDA   #5
+  009f 2009     [3]             BRA   LAA ;abs = 00aa
+  00a1          LA1:    
+  745:      }
+  746:    }
+  747:    else
+  748:    {
+  749:      /* Allocation of a message buffer failed. */
+  750:      UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
+  00a1 450000   [3]             LDHX  @"Message allocation failed!\012\015"
+  00a4 ac0000ad [8]             CALL  Router_SendAssociateResponse:173
+  751:      return errorAllocFailed;
+  00a8 a604     [2]             LDA   #4
+  00aa          LAA:    
+  752:    }
+  753:  }
+  00aa a706     [2]             AIS   #6
+  00ac 8d       [7]             RTC   
+  00ad          LAD:    
+  00ad a601     [2]             LDA   #1
+  00af ac000000 [8]             CALL  UartUtil_Print
+  00b3 8d       [7]             RTC   
+  754:  
+  755:  /************************************************************************************
+  756:  *************************************************************************************
+  757:  * Private functions
+  758:  *************************************************************************************
+  759:  ************************************************************************************/
+  760:  
+  761:  
+  762:  /* added by yusk */
+  763:  static void Router_TransmitUartData(void)
+  764:  {   
+  0000 a7f8     [2]             AIS   #-8
+  765:    static uint8_t keysBuffer[mMaxKeysToReceive_c];
+  766:    static uint8_t keysReceived = 0;
+  767:    const uint8_t broadcastaddress[8] = { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+  0002 a6ff     [2]             LDA   #-1
+  0004 95       [2]             TSX   
+  0005 f7       [2]             STA   ,X
+  0006 e701     [3]             STA   1,X
+  0008 6f02     [5]             CLR   2,X
+  000a 6f03     [5]             CLR   3,X
+  000c 6f04     [5]             CLR   4,X
+  000e 6f05     [5]             CLR   5,X
+  0010 6f06     [5]             CLR   6,X
+  0012 6f07     [5]             CLR   7,X
+  768:  
+  769:    
+  770:    /* get data from UART */
+  771:    if( keysReceived < mMaxKeysToReceive_c) 
+  0014 c60000   [4]             LDA   keysReceived
+  0017 a120     [2]             CMP   #32
+  0019 2414     [3]             BCC   L2F ;abs = 002f
+  772:    { 
+  773:      if(UartX_GetByteFromRxBuffer(&keysBuffer[keysReceived])) 
+  001b ab00     [2]             ADD   @keysBuffer
+  001d 87       [2]             PSHA  
+  001e 4f       [1]             CLRA  
+  001f a900     [2]             ADC   @keysBuffer:MSB
+  0021 88       [3]             PULX  
+  0022 87       [2]             PSHA  
+  0023 8a       [3]             PULH  
+  0024 ac000000 [8]             CALL  Uart1_GetByteFromRxBuffer
+  0028 4d       [1]             TSTA  
+  0029 2704     [3]             BEQ   L2F ;abs = 002f
+  774:      {
+  775:      keysReceived++;
+  002b 450000   [3]             LDHX  @keysReceived
+  002e 7c       [4]             INC   ,X
+  002f          L2F:    
+  776:      }
+  777:    }
+  778:    /* Use multi buffering for increased TX performance. It does not really
+  779:       have any effect at a UART baud rate of 19200bps but serves as an
+  780:       example of how the throughput may be improved in a real-world 
+  781:       application where the data rate is of concern. */
+  782:    if( (mcPendingPackets < mDefaultValueOfMaxPendingDataPackets_c) && (mpPacket == NULL) ) 
+  002f c60000   [4]             LDA   mcPendingPackets
+  0032 a102     [2]             CMP   #2
+  0034 240e     [3]             BCC   L44 ;abs = 0044
+  0036 320000   [5]             LDHX  mpPacket
+  0039 2609     [3]             BNE   L44 ;abs = 0044
+  783:    {
+  784:      /* If the maximum number of pending data buffes is below maximum limit 
+  785:         and we do not have a data buffer already then allocate one. */
+  786:      mpPacket = MSG_Alloc(gMaxRxTxDataLength_c);
+  003b a68d     [2]             LDA   #-115
+  003d ac000000 [8]             CALL  MM_Alloc
+  0041 960000   [5]             STHX  mpPacket
+  0044          L44:    
+  787:    }
+  788:  
+  789:    if(mpPacket != NULL)
+  0044 320000   [5]             LDHX  mpPacket
+  0047 277e     [3]             BEQ   LC7 ;abs = 00c7
+  790:    {
+  791:        /* get data from UART */        
+  792:        mpPacket->msgData.dataReq.pMsdu = (uint8_t*)(&(mpPacket->msgData.dataReq.pMsdu)) + sizeof(uint8_t*);
+  0049 af1c     [2]             AIX   #28
+  004b 9f       [1]             TXA   
+  004c 8b       [2]             PSHH  
+  004d 320000   [5]             LDHX  mpPacket
+  0050 e71b     [3]             STA   27,X
+  0052 86       [3]             PULA  
+  0053 e71a     [3]             STA   26,X
+  793:        FLib_MemCpy(mpPacket->msgData.dataReq.pMsdu, (uint8_t*) keysBuffer, keysReceived);
+  0055 9ece1a   [5]             LDHX  26,X
+  0058 89       [2]             PSHX  
+  0059 8b       [2]             PSHH  
+  005a 450000   [3]             LDHX  @keysBuffer
+  005d c60000   [4]             LDA   keysReceived
+  0060 ac000000 [8]             CALL  FLib_MemCpy
+  0064 a702     [2]             AIS   #2
+  794:  
+  795:        /* Data was available in the UART receive buffer. Now create an
+  796:           MCPS-Data Request message containing the UART data. */
+  797:        mpPacket->msgType = gMcpsDataReq_c;
+  0066 320000   [5]             LDHX  mpPacket
+  0069 7f       [4]             CLR   ,X
+  798:        /* Create the header using device information stored when creating 
+  799:           the association response. In this simple example the use of short
+  800:           addresses is hardcoded. In a real world application we must be
+  801:           flexible, and use the address mode required by the given situation. */
+  802:        
+  803:        
+  804:        FLib_MemCpy(mpPacket->msgData.dataReq.dstAddr, (void *)broadcastaddress, 2);
+  006a af01     [2]             AIX   #1
+  006c 89       [2]             PSHX  
+  006d 8b       [2]             PSHH  
+  006e 95       [2]             TSX   
+  006f af02     [2]             AIX   #2
+  0071 a602     [2]             LDA   #2
+  0073 ac000000 [8]             CALL  FLib_MemCpy
+  0077 a702     [2]             AIS   #2
+  805:        FLib_MemCpy(mpPacket->msgData.dataReq.srcAddr, (void *)maShortAddress, 2);
+  0079 320000   [5]             LDHX  mpPacket
+  007c af0c     [2]             AIX   #12
+  007e 89       [2]             PSHX  
+  007f 8b       [2]             PSHH  
+  0080 450000   [3]             LDHX  @maShortAddress
+  0083 a602     [2]             LDA   #2
+  0085 ac000000 [8]             CALL  FLib_MemCpy
+  0089 a702     [2]             AIS   #2
+  806:        FLib_MemCpy(mpPacket->msgData.dataReq.dstPanId, (void *)maPanId, 2);
+  008b 320000   [5]             LDHX  mpPacket
+  008e af09     [2]             AIX   #9
+  0090 ac0000d9 [8]             CALL  Router_TransmitUartData:217
+  807:        FLib_MemCpy(mpPacket->msgData.dataReq.srcPanId, (void *)maPanId, 2);
+  0094 320000   [5]             LDHX  mpPacket
+  0097 af14     [2]             AIX   #20
+  0099 ac0000d9 [8]             CALL  Router_TransmitUartData:217
+  808:        mpPacket->msgData.dataReq.dstAddrMode = gAddrModeShort_c;
+  009d a602     [2]             LDA   #2
+  009f 320000   [5]             LDHX  mpPacket
+  00a2 e70b     [3]             STA   11,X
+  809:        mpPacket->msgData.dataReq.srcAddrMode = gAddrModeShort_c;
+  00a4 e716     [3]             STA   22,X
+  810:        mpPacket->msgData.dataReq.msduLength = keysReceived;
+  00a6 c60000   [4]             LDA   keysReceived
+  00a9 e717     [3]             STA   23,X
+  811:        /* Request MAC level acknowledgement, and 
+  812:           indirect transmission of the data packet */
+  813:        mpPacket->msgData.dataReq.txOptions = 0;
+  00ab 6f19     [5]             CLR   25,X
+  814:        /* Give the data packet a handle. The handle is
+  815:           returned in the MCPS-Data Confirm message. */
+  816:        mpPacket->msgData.dataReq.msduHandle = mMsduHandle++;
+  00ad c60000   [4]             LDA   mMsduHandle
+  00b0 e718     [3]             STA   24,X
+  00b2 4c       [1]             INCA  
+  00b3 c70000   [4]             STA   mMsduHandle
+  817:  #ifdef gMAC2006_d
+  818:      mpPacket->msgData.dataReq.securityLevel = 0;
+  819:  #endif //gMAC2006_d   
+  820:        
+  821:        /* Send the Data Request to the MCPS */
+  822:        (void)MSG_Send(NWK_MCPS, mpPacket);
+  00b6 ac000000 [8]             CALL  NWK_MCPS_SapHandler
+  823:        /* Prepare for another data buffer */
+  824:        mpPacket = NULL;
+  00ba 5f       [1]             CLRX  
+  00bb 8c       [1]             CLRH  
+  00bc 960000   [5]             STHX  mpPacket
+  825:        mcPendingPackets++;
+  00bf 450000   [3]             LDHX  @mcPendingPackets
+  00c2 7c       [4]             INC   ,X
+  826:        /* Receive another pressed keys */
+  827:        keysReceived = 0;
+  00c3 4f       [1]             CLRA  
+  00c4 c70000   [4]             STA   keysReceived
+  00c7          LC7:    
+  828:    }
+  829:    
+  830:    /* If the keysBuffer[] wasn't send over the air because there are too many pending packets, */
+  831:    /* try to send it later   */
+  832:    if (keysReceived)
+  00c7 c60000   [4]             LDA   keysReceived
+  00ca 270a     [3]             BEQ   LD6 ;abs = 00d6
+  833:    {
+  834:    TS_SendEvent(gAppTaskID_c, gAppEvtRxFromUart_c);
+  00cc c60000   [4]             LDA   gAppTaskID_c
+  00cf ae02     [2]             LDX   #2
+  00d1 8c       [1]             CLRH  
+  00d2 ac000000 [8]             CALL  TS_SendEvent
+  00d6          LD6:    
+  835:    }
+  836:  }
+  00d6 a708     [2]             AIS   #8
+  00d8 8d       [7]             RTC   
+  00d9          LD9:    
+  00d9 89       [2]             PSHX  
+  00da 8b       [2]             PSHH  
+  00db 450000   [3]             LDHX  @maPanId
+  00de a602     [2]             LDA   #2
+  00e0 ac000000 [8]             CALL  FLib_MemCpy
+  00e4 a702     [2]             AIS   #2
+  00e6 8d       [7]             RTC   
+  837:  
+  838:  
+  839:  /******************************************************************************
+  840:  * The App_StartScan(scanType) function will start the scan process of the
+  841:  * specified type in the MAC. This is accomplished by allocating a MAC message,
+  842:  * which is then assigned the desired scan parameters and sent to the MLME
+  843:  * service access point.
+  844:  * The function may return either of the following values:
+  845:  *   errorNoError:          The Scan message was sent successfully.
+  846:  *   errorInvalidParameter: The MLME service access point rejected the
+  847:  *                          message due to an invalid parameter.
+  848:  *   errorAllocFailed:      A message buffer could not be allocated.
+  849:  *
+  850:  ******************************************************************************/
+  851:  static uint8_t App_StartScan(uint8_t scanType)
+  852:  {
+  0000 87       [2]             PSHA  
+  0001 a7fe     [2]             AIS   #-2
+  853:    mlmeMessage_t *pMsg;
+  854:    mlmeScanReq_t *pScanReq;
+  855:  
+  856:    UartUtil_Print("Sending the MLME-Scan Request message to the MAC...", gAllowToBlock_d);
+  0003 450000   [3]             LDHX  @"Sending the MLME-Scan Request message to the MAC..."
+  0006 ac000056 [8]             CALL  App_StartScan:86
+  857:  
+  858:    /* Allocate a message for the MLME (We should check for NULL). */
+  859:    pMsg = MSG_AllocType(mlmeMessage_t);
+  000a a60f     [2]             LDA   #15
+  000c ac000000 [8]             CALL  MM_Alloc
+  0010 9eff01   [5]             STHX  1,SP
+  860:    if(pMsg != NULL)
+  0013 2735     [3]             BEQ   L4A ;abs = 004a
+  861:    {
+  862:      /* This is a MLME-SCAN.req command */
+  863:      pMsg->msgType = gMlmeScanReq_c;
+  0015 a608     [2]             LDA   #8
+  0017 f7       [2]             STA   ,X
+  864:      /* Create the Scan request message data. */
+  865:      pScanReq = &pMsg->msgData.scanReq;
+  866:      /* gScanModeED_c, gScanModeActive_c, gScanModePassive_c, or gScanModeOrphan_c */
+  867:      pScanReq->scanType = scanType;
+  0018 9ee603   [4]             LDA   3,SP
+  001b e701     [3]             STA   1,X
+  868:      /* ChannelsToScan & 0xFF - LSB, always 0x00 */
+  869:      pScanReq->scanChannels[0] = (uint8_t)((mDefaultValueOfChannel_c)     & 0xFF);
+  001d 6f02     [5]             CLR   2,X
+  870:      /* ChannelsToScan>>8 & 0xFF  */
+  871:      pScanReq->scanChannels[1] = (uint8_t)((mDefaultValueOfChannel_c>>8)  & 0xFF);
+  001f 6f03     [5]             CLR   3,X
+  872:      /* ChannelsToScan>>16 & 0xFF  */
+  873:      pScanReq->scanChannels[2] = (uint8_t)((mDefaultValueOfChannel_c>>16) & 0xFF);
+  0021 6f04     [5]             CLR   4,X
+  874:      /* ChannelsToScan>>24 & 0xFF - MSB */
+  875:      pScanReq->scanChannels[3] = (uint8_t)((mDefaultValueOfChannel_c>>24) & 0xFF);
+  0023 a602     [2]             LDA   #2
+  0025 e705     [3]             STA   5,X
+  876:      /* Duration per channel 0-14 (dc). T[sec] = (16*960*((2^dc)+1))/1000000.
+  877:         A scan duration of 2 on 16 channels approximately takes 1.2 secs. */
+  878:      /* We know beforehand that we will talk to a coordinator with a Beacon
+  879:         order of 1. Thus, choosing a Scan Duration of 2 per channel gives us
+  880:         a very good chance (100% assuming no interference) of finding the
+  881:         coordinator. 1 should be fine too though in an RF quiet environment. */
+  882:      pScanReq->scanDuration = mDefaultValueOfScanDuration_c;
+  0027 a607     [2]             LDA   #7
+  0029 e706     [3]             STA   6,X
+  883:  #ifdef gMAC2006_d
+  884:  	pScanReq->securityLevel = 0;
+  885:  #endif //gMAC2006_d	
+  886:      
+  887:      /* Send the Scan request to the MLME. */
+  888:      if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
+  002b 9efe01   [5]             LDHX  1,SP
+  002e ac000000 [8]             CALL  NWK_MLME_SapHandler
+  0032 4d       [1]             TSTA  
+  0033 260a     [3]             BNE   L3F ;abs = 003f
+  889:      {
+  890:        UartUtil_Print("Done\n\r", gAllowToBlock_d);
+  0035 450000   [3]             LDHX  @"Done\012\015"
+  0038 ac000056 [8]             CALL  App_StartScan:86
+  891:        return errorNoError;
+  003c 4f       [1]             CLRA  
+  003d 2014     [3]             BRA   L53 ;abs = 0053
+  003f          L3F:    
+  892:      }
+  893:      else
+  894:      {
+  895:        UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
+  003f 450000   [3]             LDHX  @"Invalid parameter!\012\015"
+  0042 ac000056 [8]             CALL  App_StartScan:86
+  896:        return errorInvalidParameter;
+  0046 a605     [2]             LDA   #5
+  0048 2009     [3]             BRA   L53 ;abs = 0053
+  004a          L4A:    
+  897:      }
+  898:    }
+  899:    else
+  900:    {
+  901:      /* Allocation of a message buffer failed. */
+  902:      UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
+  004a 450000   [3]             LDHX  @"Message allocation failed!\012\015"
+  004d ac000056 [8]             CALL  App_StartScan:86
+  903:      return errorAllocFailed;
+  0051 a604     [2]             LDA   #4
+  0053          L53:    
+  904:    }
+  905:  }
+  0053 a703     [2]             AIS   #3
+  0055 8d       [7]             RTC   
+  0056          L56:    
+  0056 a601     [2]             LDA   #1
+  0058 ac000000 [8]             CALL  UartUtil_Print
+  005c 8d       [7]             RTC   
+  906:  
+  907:  /******************************************************************************
+  908:  * The App_HandleScanActiveConfirm(nwkMessage_t *pMsg) function will handle the
+  909:  * Active Scan confirm message received from the MLME when the Active scan has
+  910:  * completed. The message contains a list of PAN descriptors. Based on link
+  911:  * quality information in the pan descriptors the nearest coordinator is chosen.
+  912:  * The corresponding pan descriptor is stored in the global variable mCoordInfo. 
+  913:  *
+  914:  * If a suitable coordinator was found, we synchronize to it immediately.
+  915:  *
+  916:  * The function may return either of the following values:
+  917:  *   errorNoError:       A suitable pan descriptor was found.
+  918:  *   errorNoScanResults: No scan results were present in the confirm message.
+  919:  *
+  920:  ******************************************************************************/
+  921:  static uint8_t App_HandleScanActiveConfirm(nwkMessage_t *pMsg)
+  922:  {
+  0000 a7f3     [2]             AIS   #-13
+  923:    void    *pBlock;
+  924:    uint8_t panDescListSize = pMsg->msgData.scanCnf.resultListSize;
+  0002 e603     [3]             LDA   3,X
+  0004 9ee70a   [4]             STA   10,SP
+  925:    uint8_t rc = errorNoScanResults;
+  0007 a606     [2]             LDA   #6
+  0009 9ee707   [4]             STA   7,SP
+  926:    uint8_t j;
+  927:    uint8_t bestLinkQuality = 0;  
+  000c 9e6f09   [6]             CLR   9,SP
+  928:    panDescriptorBlock_t *pDescBlock = pMsg->msgData.scanCnf.resList.pPanDescriptorBlocks;  
+  000f 9ece08   [5]             LDHX  8,X
+  0012 9eff05   [5]             STHX  5,SP
+  929:    panDescriptor_t *pPanDesc;      
+  930:   
+  931:    /* Check if the scan resulted in any coordinator responses. */  
+  932:    
+  933:    if (panDescListSize > 0)
+  0015 95       [2]             TSX   
+  0016 6d09     [4]             TST   9,X
+  0018 266d     [3]             BNE   L87 ;abs = 0087
+  001a 206e     [3]             BRA   L8A ;abs = 008a
+  001c          L1C:    
+  934:    {    
+  935:      /* Check all PAN descriptors. */
+  936:      while (NULL != pDescBlock)
+  937:      {
+  938:        for (j = 0; j < pDescBlock->descriptorCount; j++)
+  001c 95       [2]             TSX   
+  001d 6f07     [5]             CLR   7,X
+  001f 204b     [3]             BRA   L6C ;abs = 006c
+  0021          L21:    
+  939:        {            
+  940:          pPanDesc = &pDescBlock->descriptorList[j];
+  0021 95       [2]             TSX   
+  0022 e607     [3]             LDA   7,X
+  0024 ae16     [2]             LDX   #22
+  0026 42       [5]             MUL   
+  0027 9efe05   [5]             LDHX  5,SP
+  002a 9eeb06   [4]             ADD   6,SP
+  002d 87       [2]             PSHA  
+  002e 8b       [2]             PSHH  
+  002f 86       [3]             PULA  
+  0030 a900     [2]             ADC   #0
+  0032 88       [3]             PULX  
+  941:  
+  942:          /* Only attempt to associate if the coordinator accepts associations. */
+  943:          if( pPanDesc->superFrameSpec[1] & gSuperFrameSpecMsbAssocPermit_c) 
+  0033 87       [2]             PSHA  
+  0034 8a       [3]             PULH  
+  0035 e610     [3]             LDA   16,X
+  0037 2a30     [3]             BPL   L69 ;abs = 0069
+  944:          {
+  945:            if ((pPanDesc->coordPanId[1]==coordinaterPanId[1])&&
+  0039 e609     [3]             LDA   9,X
+  003b a170     [2]             CMP   #112
+  003d 262a     [3]             BNE   L69 ;abs = 0069
+  946:                (pPanDesc->coordPanId[0]==coordinaterPanId[0]))
+  003f e608     [3]             LDA   8,X
+  0041 a104     [2]             CMP   #4
+  0043 2624     [3]             BNE   L69 ;abs = 0069
+  947:            {
+  948:              /* Find the nearest coordinator using the link quality measure. */
+  949:              if(pPanDesc->linkQuality > bestLinkQuality)
+  0045 9ee609   [4]             LDA   9,SP
+  0048 e112     [3]             CMP   18,X
+  004a 241d     [3]             BCC   L69 ;abs = 0069
+  950:              {
+  951:                /* Save the information of the coordinator candidate. If we
+  952:                   find a better candiate, the information will be replaced. */
+  953:                FLib_MemCpy(&mCoordInfo, pPanDesc, sizeof(panDescriptor_t));
+  004c 9eff01   [5]             STHX  1,SP
+  004f 450000   [3]             LDHX  @mCoordInfo
+  0052 89       [2]             PSHX  
+  0053 8b       [2]             PSHH  
+  0054 9efe03   [5]             LDHX  3,SP
+  0057 a616     [2]             LDA   #22
+  0059 ac000000 [8]             CALL  FLib_MemCpy
+  005d a702     [2]             AIS   #2
+  954:                bestLinkQuality = pPanDesc->linkQuality;
+  005f 9efe01   [5]             LDHX  1,SP
+  0062 e612     [3]             LDA   18,X
+  0064 95       [2]             TSX   
+  0065 e708     [3]             STA   8,X
+  955:                rc = errorNoError;
+  0067 6f06     [5]             CLR   6,X
+  0069          L69:    
+  0069 95       [2]             TSX   
+  006a 6c07     [5]             INC   7,X
+  006c          L6C:    
+  006c 9efe05   [5]             LDHX  5,SP
+  006f e66e     [3]             LDA   110,X
+  0071 9ee108   [4]             CMP   8,SP
+  0074 22ab     [3]             BHI   L21 ;abs = 0021
+  956:              }
+  957:            }
+  958:          }      
+  959:        }
+  960:        
+  961:        /* Free current block */
+  962:        pBlock = pDescBlock;
+  963:        pDescBlock = pDescBlock->pNext;              
+  0076 89       [2]             PSHX  
+  0077 8b       [2]             PSHH  
+  0078 9ece6f   [5]             LDHX  111,X
+  007b 9eff07   [5]             STHX  7,SP
+  964:        MSG_Free(pBlock);
+  007e 9efe01   [5]             LDHX  1,SP
+  0081 ac000000 [8]             CALL  MM_Free
+  0085 a702     [2]             AIS   #2
+  0087          L87:    
+  0087 9efe05   [5]             LDHX  5,SP
+  008a          L8A:    
+  008a 2690     [3]             BNE   L1C ;abs = 001c
+  965:      }
+  966:    }
+  967:  
+  968:    if(rc == errorNoError)
+  008c 95       [2]             TSX   
+  008d 6d06     [4]             TST   6,X
+  008f 2703     [3]             BEQ   L94 ;abs = 0094
+  0091 cc0150   [4]             JMP   L150 ;abs = 0150
+  0094          L94:    
+  969:    {
+  970:      /* If we have found a beaconing coodinator we must setup the MAC to
+  971:         synchronize to the beacon frames. This requires us to set the
+  972:         PAN ID attribute of the MAC PIB to the PAN ID of the coordinator.
+  973:         Furthermore, if we want to take advantage of the automatic
+  974:         polling feature we must set the Auto Request MAC PIB attribute. */
+  975:      if((mCoordInfo.superFrameSpec[0] & gSuperFrameSpecLsbBO_c) < 0xF) 
+  0094 c6000f   [4]             LDA   mCoordInfo:15
+  0097 a40f     [2]             AND   #15
+  0099 a10f     [2]             CMP   #15
+  009b 2503     [3]             BCS   LA0 ;abs = 00a0
+  009d cc0150   [4]             JMP   L150 ;abs = 0150
+  00a0          LA0:    
+  976:      {
+  977:        mlmeMessage_t *pMsgOut = MSG_AllocType(mlmeMessage_t);
+  00a0 a60f     [2]             LDA   #15
+  00a2 ac000000 [8]             CALL  MM_Alloc
+  00a6 9eff03   [5]             STHX  3,SP
+  978:        if(pMsgOut != NULL)
+  00a9 2603     [3]             BNE   LAE ;abs = 00ae
+  00ab cc0150   [4]             JMP   L150 ;abs = 0150
+  00ae          LAE:    
+  979:        {
+  980:          uint8_t value = TRUE;
+  00ae a601     [2]             LDA   #1
+  00b0 95       [2]             TSX   
+  00b1 e70a     [3]             STA   10,X
+  981:          uint8_t mBeaconOrder;
+  982:  		uint8_t mSuperFrameOrder;
+  983:          /* Set MAC PIB auto request to TRUE. In this way the device will
+  984:             automatically poll for data if the pending address list of the 
+  985:             beacon frame contains our address. */
+  986:          pMsgOut->msgType = gMlmeSetReq_c;
+  00b3 9efe03   [5]             LDHX  3,SP
+  00b6 a609     [2]             LDA   #9
+  00b8 f7       [2]             STA   ,X
+  987:          pMsgOut->msgData.setReq.pibAttribute = gMPibAutoRequest_c;
+  00b9 a642     [2]             LDA   #66
+  00bb e701     [3]             STA   1,X
+  988:          pMsgOut->msgData.setReq.pibAttributeValue = &value;
+  00bd 95       [2]             TSX   
+  00be af0a     [2]             AIX   #10
+  00c0 9f       [1]             TXA   
+  00c1 8b       [2]             PSHH  
+  00c2 9efe04   [5]             LDHX  4,SP
+  00c5 e703     [3]             STA   3,X
+  00c7 86       [3]             PULA  
+  00c8 e702     [3]             STA   2,X
+  989:          /* Get/Set/Reset Request messages are NOT freed by the MLME. */
+  990:          (void)MSG_Send(NWK_MLME, pMsgOut);
+  00ca ac000000 [8]             CALL  NWK_MLME_SapHandler
+  991:          
+  992:          /* Since we are going to receive data from the coordinator 
+  993:             using automatic polling we must synchronize to the beacon
+  994:             and keep tracking it. Before synchronizing it is required
+  995:             that the MAC PIB PAN ID, and the MAC PIB coordinator
+  996:             address is set. */
+  997:          pMsgOut->msgData.setReq.pibAttribute = gMPibPanId_c;
+  00ce 9efe03   [5]             LDHX  3,SP
+  00d1 a650     [2]             LDA   #80
+  00d3 e701     [3]             STA   1,X
+  998:          pMsgOut->msgData.setReq.pibAttributeValue = mCoordInfo.coordPanId;
+  00d5 a608     [2]             LDA   @mCoordInfo:8:MSB
+  00d7 e702     [3]             STA   2,X
+  00d9 a608     [2]             LDA   @mCoordInfo:8
+  00db e703     [3]             STA   3,X
+  999:          /* Get/Set/Reset Request messages are NOT freed by the MLME. */
+ 1000:          (void)MSG_Send(NWK_MLME, pMsgOut);
+  00dd ac000000 [8]             CALL  NWK_MLME_SapHandler
+ 1001:  
+ 1002:          /* Set coordinator address PIB attribute according the the 
+ 1003:             address mode of the coordinator (short or long address). */
+ 1004:          pMsgOut->msgData.setReq.pibAttribute = 
+ 1005:            mCoordInfo.coordAddrMode == gAddrModeShort_c ? gMPibCoordShortAddress_c :
+  00e1 c6000a   [4]             LDA   mCoordInfo:10
+  00e4 410203   [4]             CBEQA #2,LEA ;abs = 00ea
+ 1006:                                                          gMPibCoordExtendedAddress_c;
+  00e7 a64a     [2]             LDA   #74
+  00e9 65       [3]             SKIP2 LEC ;abs = 00ec
+  00ea          LEA:    
+  00ea a64b     [2]             LDA   #75
+  00ec          LEC:    
+  00ec 9efe03   [5]             LDHX  3,SP
+  00ef e701     [3]             STA   1,X
+ 1007:          pMsgOut->msgData.setReq.pibAttributeValue = mCoordInfo.coordAddress;
+  00f1 a600     [2]             LDA   @mCoordInfo:MSB
+  00f3 e702     [3]             STA   2,X
+  00f5 a600     [2]             LDA   @mCoordInfo
+  00f7 e703     [3]             STA   3,X
+ 1008:          /* Get/Set/Reset Request messages are NOT freed by the MLME. */
+ 1009:          (void)MSG_Send(NWK_MLME, pMsgOut);
+  00f9 ac000000 [8]             CALL  NWK_MLME_SapHandler
+ 1010:  
+ 1011:  
+ 1012:          /* Set macBeaconOrder PIB attribute according to the 
+ 1013:             value found in beacon.*/
+ 1014:          mBeaconOrder = (mCoordInfo.superFrameSpec[0] & 0x0F);   
+  00fd c6000f   [4]             LDA   mCoordInfo:15
+  0100 a40f     [2]             AND   #15
+  0102 95       [2]             TSX   
+  0103 e70b     [3]             STA   11,X
+ 1015:          pMsgOut->msgData.setReq.pibAttribute = gMPibBeaconOrder_c;                                             
+  0105 9efe03   [5]             LDHX  3,SP
+  0108 a647     [2]             LDA   #71
+  010a e701     [3]             STA   1,X
+ 1016:          pMsgOut->msgData.setReq.pibAttributeValue = &mBeaconOrder;
+  010c 95       [2]             TSX   
+  010d af0b     [2]             AIX   #11
+  010f 9f       [1]             TXA   
+  0110 8b       [2]             PSHH  
+  0111 9efe04   [5]             LDHX  4,SP
+  0114 e703     [3]             STA   3,X
+  0116 86       [3]             PULA  
+  0117 e702     [3]             STA   2,X
+ 1017:          /* Get/Set/Reset Request messages are NOT freed by the MLME. */
+ 1018:          (void)MSG_Send(NWK_MLME, pMsgOut);
+  0119 ac000000 [8]             CALL  NWK_MLME_SapHandler
+ 1019:  
+ 1020:          /* Set macSuperFrameOrder PIB attribute according to the 
+ 1021:             value found in beacon.*/
+ 1022:          mSuperFrameOrder = (mCoordInfo.superFrameSpec[0] & 0xF0);   
+  011d c6000f   [4]             LDA   mCoordInfo:15
+  0120 a4f0     [2]             AND   #-16
+  0122 95       [2]             TSX   
+  0123 e70c     [3]             STA   12,X
+ 1023:          pMsgOut->msgData.setReq.pibAttribute = gMPibSuperFrameOrder_c;                                             
+  0125 9efe03   [5]             LDHX  3,SP
+  0128 a654     [2]             LDA   #84
+  012a e701     [3]             STA   1,X
+ 1024:          pMsgOut->msgData.setReq.pibAttributeValue = &mSuperFrameOrder;
+  012c 95       [2]             TSX   
+  012d af0c     [2]             AIX   #12
+  012f 9f       [1]             TXA   
+  0130 8b       [2]             PSHH  
+  0131 9efe04   [5]             LDHX  4,SP
+  0134 e703     [3]             STA   3,X
+  0136 86       [3]             PULA  
+  0137 e702     [3]             STA   2,X
+ 1025:          /* Get/Set/Reset Request messages are NOT freed by the MLME. */
+ 1026:          (void)MSG_Send(NWK_MLME, pMsgOut);  
+  0139 ac000000 [8]             CALL  NWK_MLME_SapHandler
+ 1027:          
+ 1028:          /* Now send the MLME-Sync Request. We choose to let the MAC track
+ 1029:             the beacons on the logical channel obtained by the active scan.*/
+ 1030:          pMsgOut->msgType = gMlmeSyncReq_c;
+  013d 9efe03   [5]             LDHX  3,SP
+  0140 a60b     [2]             LDA   #11
+  0142 f7       [2]             STA   ,X
+ 1031:          pMsgOut->msgData.syncReq.trackBeacon = TRUE;
+  0143 a601     [2]             LDA   #1
+  0145 e702     [3]             STA   2,X
+ 1032:          pMsgOut->msgData.syncReq.logicalChannel = mCoordInfo.logicalChannel;
+  0147 c6000b   [4]             LDA   mCoordInfo:11
+  014a e701     [3]             STA   1,X
+ 1033:          (void)MSG_Send(NWK_MLME, pMsgOut);
+  014c ac000000 [8]             CALL  NWK_MLME_SapHandler
+  0150          L150:   
+ 1034:        }
+ 1035:      }
+ 1036:    }
+ 1037:    
+ 1038:    return rc;
+  0150 95       [2]             TSX   
+  0151 e606     [3]             LDA   6,X
+ 1039:  }
+  0153 a70d     [2]             AIS   #13
+  0155 8d       [7]             RTC   
+ 1040:  
+ 1041:  
+ 1042:  /******************************************************************************
+ 1043:  * The App_SendAssociateRequest(void) will create an Associate Request message
+ 1044:  * and send it to the coordinator it wishes to associate to. The function uses
+ 1045:  * information gained about the coordinator during the scan procedure.
+ 1046:  *
+ 1047:  * The function may return either of the following values:
+ 1048:  *   errorNoError:          The Associate Request message was sent successfully.
+ 1049:  *   errorInvalidParameter: The MLME service access point rejected the
+ 1050:  *                          message due to an invalid parameter.
+ 1051:  *   errorAllocFailed:      A message buffer could not be allocated.
+ 1052:  *
+ 1053:  ******************************************************************************/
+ 1054:  static uint8_t App_SendAssociateRequest(void)
+ 1055:  {
+  0000 a7fc     [2]             AIS   #-4
+ 1056:    mlmeMessage_t *pMsg;
+ 1057:    mlmeAssociateReq_t *pAssocReq;
+ 1058:  
+ 1059:    UartUtil_Print("Sending the MLME-Associate Request message to the MAC...", gAllowToBlock_d);
+  0002 450000   [3]             LDHX  @"Sending the MLME-Associate Request message to the MAC..."
+  0005 ac000077 [8]             CALL  App_SendAssociateRequest:119
+ 1060:    
+ 1061:    /* Allocate a message for the MLME message. */
+ 1062:    pMsg = MSG_AllocType(mlmeMessage_t);
+  0009 a60f     [2]             LDA   #15
+  000b ac000000 [8]             CALL  MM_Alloc
+  000f 9eff03   [5]             STHX  3,SP
+ 1063:    if(pMsg != NULL)
+  0012 2757     [3]             BEQ   L6B ;abs = 006b
+ 1064:    {
+ 1065:      /* This is a MLME-ASSOCIATE.req command. */
+ 1066:      pMsg->msgType = gMlmeAssociateReq_c;
+  0014 7f       [4]             CLR   ,X
+ 1067:      
+ 1068:      /* Create the Associate request message data. */
+ 1069:      pAssocReq = &pMsg->msgData.associateReq;
+  0015 af01     [2]             AIX   #1
+ 1070:   
+ 1071:      /* Use the coordinator info we got from the Active Scan. */
+ 1072:      FLib_MemCpy(pAssocReq->coordAddress, mCoordInfo.coordAddress, 8);
+  0017 89       [2]             PSHX  
+  0018 8b       [2]             PSHH  
+  0019 9eff03   [5]             STHX  3,SP
+  001c 450000   [3]             LDHX  @mCoordInfo
+  001f a608     [2]             LDA   #8
+  0021 ac000000 [8]             CALL  FLib_MemCpy
+  0025 a702     [2]             AIS   #2
+ 1073:      FLib_MemCpy(pAssocReq->coordPanId,   mCoordInfo.coordPanId, 2);
+  0027 9efe01   [5]             LDHX  1,SP
+  002a af08     [2]             AIX   #8
+  002c 89       [2]             PSHX  
+  002d 8b       [2]             PSHH  
+  002e 450008   [3]             LDHX  @mCoordInfo:8
+  0031 a602     [2]             LDA   #2
+  0033 ac000000 [8]             CALL  FLib_MemCpy
+  0037 a702     [2]             AIS   #2
+ 1074:      pAssocReq->coordAddrMode      = mCoordInfo.coordAddrMode;
+  0039 c6000a   [4]             LDA   mCoordInfo:10
+  003c 9efe01   [5]             LDHX  1,SP
+  003f e70a     [3]             STA   10,X
+ 1075:      pAssocReq->logicalChannel     = mCoordInfo.logicalChannel;
+  0041 c6000b   [4]             LDA   mCoordInfo:11
+  0044 e70b     [3]             STA   11,X
+ 1076:  #ifndef gMAC2006_d
+ 1077:      pAssocReq->securityEnable     = FALSE;
+  0046 6f0c     [5]             CLR   12,X
+ 1078:  #else
+ 1079:  	pAssocReq->securityLevel = 0;
+ 1080:  #endif //gMAC2006_d	
+ 1081:      /* We want the coordinator to assign a short address to us. */
+ 1082:      pAssocReq->capabilityInfo     = gCapInfoAllocAddr_c;
+  0048 a680     [2]             LDA   #-128
+  004a e70d     [3]             STA   13,X
+ 1083:        
+ 1084:      /* Send the Associate Request to the MLME. */
+ 1085:      if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
+  004c 9efe03   [5]             LDHX  3,SP
+  004f ac000000 [8]             CALL  NWK_MLME_SapHandler
+  0053 4d       [1]             TSTA  
+  0054 260a     [3]             BNE   L60 ;abs = 0060
+ 1086:      {
+ 1087:        UartUtil_Print("Done\n\r", gAllowToBlock_d);
+  0056 450000   [3]             LDHX  @"Done\012\015"
+  0059 ac000077 [8]             CALL  App_SendAssociateRequest:119
+ 1088:        return errorNoError;
+  005d 4f       [1]             CLRA  
+  005e 2014     [3]             BRA   L74 ;abs = 0074
+  0060          L60:    
+ 1089:      }
+ 1090:      else
+ 1091:      {
+ 1092:        /* One or more parameters in the message were invalid. */
+ 1093:        UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
+  0060 450000   [3]             LDHX  @"Invalid parameter!\012\015"
+  0063 ac000077 [8]             CALL  App_SendAssociateRequest:119
+ 1094:        return errorInvalidParameter;
+  0067 a605     [2]             LDA   #5
+  0069 2009     [3]             BRA   L74 ;abs = 0074
+  006b          L6B:    
+ 1095:      }
+ 1096:    }
+ 1097:    else
+ 1098:    {
+ 1099:      /* Allocation of a message buffer failed - 
+ 1100:         the state machine will call us again. */
+ 1101:      UartUtil_Print("Message allocation failed - retrying...\n\r", gAllowToBlock_d);
+  006b 450000   [3]             LDHX  @"Message allocation failed - retrying...\012\015"
+  006e ac000077 [8]             CALL  App_SendAssociateRequest:119
+ 1102:      return errorAllocFailed;
+  0072 a604     [2]             LDA   #4
+  0074          L74:    
+ 1103:    }
+ 1104:  }
+  0074 a704     [2]             AIS   #4
+  0076 8d       [7]             RTC   
+  0077          L77:    
+  0077 a601     [2]             LDA   #1
+  0079 ac000000 [8]             CALL  UartUtil_Print
+  007d 8d       [7]             RTC   
+ 1105:  
+ 1106:  /******************************************************************************
+ 1107:  * The App_HandleAssociateConfirm(nwkMessage_t *pMsg) function will handle the
+ 1108:  * Associate confirm message received from the MLME when the Association
+ 1109:  * procedure has completed. The message contains the short address that the
+ 1110:  * coordinator has assigned to us. This address is 0xfffe if we did not specify
+ 1111:  * the gCapInfoAllocAddr_c flag in the capability info field of the Associate
+ 1112:  * request. The address and address mode are saved in global variables. They
+ 1113:  * will be used in the next demo application when sending data.
+ 1114:  *
+ 1115:  ******************************************************************************/
+ 1116:  static uint8_t App_HandleAssociateConfirm(nwkMessage_t *pMsg)
+ 1117:  {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 8b       [2]             PSHH  
+ 1118:  
+ 1119:  	mlmeMessage_t *pMsg_;
+ 1120:  	uint8_t ret;
+ 1121:  	uint8_t boolFlag;
+ 1122:  
+ 1123:  	
+ 1124:    /* This is our own extended address (MAC address). It cannot be modified. */
+ 1125:    extern uint8_t aExtendedAddress[8];
+ 1126:    
+ 1127:    /* If the coordinator assigns a short address of 0xfffe then,
+ 1128:       that means we must use our own extended address in all
+ 1129:       communications with the coordinator. Otherwise, we use
+ 1130:       the short address assigned to us. */
+ 1131:    if ( pMsg->msgData.associateCnf.status == gSuccess_c) 
+  0003 6d03     [4]             TST   3,X
+  0005 2663     [3]             BNE   L6A ;abs = 006a
+ 1132:    {
+ 1133:  
+ 1134:      if( (pMsg->msgData.associateCnf.assocShortAddress[0] >= 0xFE) && 
+  0007 e601     [3]             LDA   1,X
+  0009 a1fe     [2]             CMP   #-2
+  000b 2516     [3]             BCS   L23 ;abs = 0023
+ 1135:          (pMsg->msgData.associateCnf.assocShortAddress[1] == 0xFF) )
+  000d e602     [3]             LDA   2,X
+  000f 4c       [1]             INCA  
+  0010 2611     [3]             BNE   L23 ;abs = 0023
+ 1136:      {
+ 1137:        mAddrMode = gAddrModeLong_c;
+  0012 a603     [2]             LDA   #3
+  0014 c70000   [4]             STA   mAddrMode
+ 1138:        FLib_MemCpy(maMyAddress, (void *)aExtendedAddress, 8);
+  0017 450000   [3]             LDHX  @maMyAddress
+  001a 89       [2]             PSHX  
+  001b 8b       [2]             PSHH  
+  001c 450000   [3]             LDHX  @aExtendedAddress
+  001f a608     [2]             LDA   #8
+ 1139:      }
+  0021 200f     [3]             BRA   L32 ;abs = 0032
+  0023          L23:    
+ 1140:      else
+ 1141:      {
+ 1142:        mAddrMode = gAddrModeShort_c;
+  0023 a602     [2]             LDA   #2
+  0025 c70000   [4]             STA   mAddrMode
+ 1143:        FLib_MemCpy(maMyAddress, pMsg->msgData.associateCnf.assocShortAddress, 2);
+  0028 450000   [3]             LDHX  @maMyAddress
+  002b 89       [2]             PSHX  
+  002c 8b       [2]             PSHH  
+  002d 9efe04   [5]             LDHX  4,SP
+  0030 af01     [2]             AIX   #1
+  0032          L32:    
+  0032 ac000000 [8]             CALL  FLib_MemCpy
+  0036 a702     [2]             AIS   #2
+ 1144:      }
+ 1145:      
+ 1146:      pMsg_=MSG_AllocType(mlmeMessage_t);
+  0038 a60f     [2]             LDA   #15
+  003a ac000000 [8]             CALL  MM_Alloc
+ 1147:      if (pMsg_ !=NULL)
+  003e 650000   [3]             CPHX  #0
+  0041 2725     [3]             BEQ   L68 ;abs = 0068
+ 1148:      {
+ 1149:      	pMsg_->msgType=gMlmeSetReq_c;
+  0043 a609     [2]             LDA   #9
+  0045 f7       [2]             STA   ,X
+ 1150:      	pMsg_->msgData.setReq.pibAttribute=gMPibRxOnWhenIdle_c;
+  0046 a652     [2]             LDA   #82
+  0048 e701     [3]             STA   1,X
+ 1151:      	boolFlag=TRUE;
+  004a a601     [2]             LDA   #1
+ 1152:      	pMsg_->msgData.setReq.pibAttributeValue=&boolFlag;
+  004c 89       [2]             PSHX  
+  004d 8b       [2]             PSHH  
+  004e 95       [2]             TSX   
+  004f e702     [3]             STA   2,X
+  0051 af02     [2]             AIX   #2
+  0053 8b       [2]             PSHH  
+  0054 9ee602   [4]             LDA   2,SP
+  0057 87       [2]             PSHA  
+  0058 8a       [3]             PULH  
+  0059 9f       [1]             TXA   
+  005a 9eee03   [4]             LDX   3,SP
+  005d e703     [3]             STA   3,X
+  005f 86       [3]             PULA  
+  0060 e702     [3]             STA   2,X
+ 1153:      	ret=MSG_Send(NWK_MLME,pMsg_);
+  0062 ac000000 [8]             CALL  NWK_MLME_SapHandler
+  0066 a702     [2]             AIS   #2
+  0068          L68:    
+ 1154:      }
+ 1155:      
+ 1156:      return gSuccess_c;
+  0068 4f       [1]             CLRA  
+  0069 65       [3]             SKIP2 L6C ;abs = 006c
+  006a          L6A:    
+ 1157:    } 
+ 1158:    
+ 1159:    else 
+ 1160:    {
+ 1161:    return pMsg->msgData.associateCnf.status; 
+  006a e603     [3]             LDA   3,X
+  006c          L6C:    
+ 1162:    }
+ 1163:    
+ 1164:  }
+  006c a703     [2]             AIS   #3
+  006e 8d       [7]             RTC   
+ 1165:  
+ 1166:  
+ 1167:  /******************************************************************************
+ 1168:  * The App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn) function will handle 
+ 1169:  * messages from the MCPS, e.g. Data Confirm, and Data Indication.
+ 1170:  *
+ 1171:  ******************************************************************************/
+ 1172:  static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
+ 1173:  {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 a7fe     [2]             AIS   #-2
+ 1174:    switch(pMsgIn->msgType)
+  0004 f6       [3]             LDA   ,X
+  0005 2704     [3]             BEQ   LB ;abs = 000b
+  0007 4b1f     [4]             DBNZA L28 ;abs = 0028
+  0009 200b     [3]             BRA   L16 ;abs = 0016
+  000b          LB:     
+ 1175:    {
+ 1176:      /* The MCPS-Data confirm is sent by the MAC to the network 
+ 1177:         or application layer when data has been sent. */
+ 1178:    case gMcpsDataCnf_c:
+ 1179:      if(mcPendingPackets)
+  000b c60000   [4]             LDA   mcPendingPackets
+  000e 2718     [3]             BEQ   L28 ;abs = 0028
+ 1180:        mcPendingPackets--;
+  0010 450000   [3]             LDHX  @mcPendingPackets
+  0013 7a       [4]             DEC   ,X
+  0014 2012     [3]             BRA   L28 ;abs = 0028
+  0016          L16:    
+ 1181:      break;
+ 1182:  
+ 1183:    case gMcpsDataInd_c:
+ 1184:      /* Copy the received data to the UART. */
+ 1185:      UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
+  0016 9ece1b   [5]             LDHX  27,X
+  0019 9eff01   [5]             STHX  1,SP
+  001c 9efe03   [5]             LDHX  3,SP
+  001f e617     [3]             LDA   23,X
+  0021 9efe01   [5]             LDHX  1,SP
+  0024 ac000000 [8]             CALL  UartUtil_Tx
+  0028          L28:    
+ 1186:      break;
+ 1187:    }
+ 1188:  }
+  0028 a704     [2]             AIS   #4
+  002a 8d       [7]             RTC   
+ 1189:  
+ 1190:  /******************************************************************************
+ 1191:  * The App_WaitMsg(nwkMessage_t *pMsg, uint8_t msgType) function does not, as
+ 1192:  * the name implies, wait for a message, thus blocking the execution of the
+ 1193:  * state machine. Instead the function analyzes the supplied message to 
+ 1194:  * determine whether or not the message is of the expected type.
+ 1195:  * The function may return either of the following values:
+ 1196:  *   errorNoError: The message was of the expected type.
+ 1197:  *   errorNoMessage: The message pointer is NULL.
+ 1198:  *   errorWrongConfirm: The message is not of the expected type.
+ 1199:  *
+ 1200:  ******************************************************************************/
+ 1201:  static uint8_t App_WaitMsg(nwkMessage_t *pMsg, uint8_t msgType)
+ 1202:  {
+ 1203:    /* Do we have a message? If not, the exit with error code */
+ 1204:    if(pMsg == NULL)
+  0000 650000   [3]             CPHX  #0
+  0003 2603     [3]             BNE   L8 ;abs = 0008
+ 1205:      return errorNoMessage;
+  0005 a603     [2]             LDA   #3
+  0007 8d       [7]             RTC   
+  0008          L8:     
+ 1206:  
+ 1207:    /* Is it the expected message type? If not then exit with error code */
+ 1208:    if(pMsg->msgType != msgType)
+  0008 f1       [3]             CMP   ,X
+  0009 2703     [3]             BEQ   LE ;abs = 000e
+ 1209:      return errorWrongConfirm;
+  000b a601     [2]             LDA   #1
+  000d 8d       [7]             RTC   
+  000e          LE:     
+ 1210:  
+ 1211:    /* Found the expected message. Return with success code */
+ 1212:    return errorNoError;
+  000e 4f       [1]             CLRA  
+ 1213:  }
+  000f 8d       [7]             RTC   
+ 1214:  
+ 1215:  
+ 1216:  void App_TransmitSensorData(void){
+  0000 a7f5     [2]             AIS   #-11
+ 1217:  	
+ 1218:  	uint8_t i;
+ 1219:  
+ 1220:  	static uint8_t sens_count=0;
+ 1221:  	static int16_t x_avg=0;
+ 1222:  	static int16_t y_avg=0;
+ 1223:  	static int16_t z_avg=0;
+ 1224:  
+ 1225:  	uint8_t sens_data[7];
+ 1226:  
+ 1227:  	volatile int16_t val;
+ 1228:  
+ 1229:  	UartUtil_Print("\n\r-----------------------------------------------\n\r", gAllowToBlock_d); 
+  0002 450000   [3]             LDHX  @"\012\015-----------------------------------------------\012\015"
+  0005 ac0001b3 [8]             CALL  App_TransmitSensorData:435
+ 1230:  	for(i=1; i<4; i++){
+  0009 a601     [2]             LDA   #1
+  000b 95       [2]             TSX   
+  000c e701     [3]             STA   1,X
+  000e          LE:     
+ 1231:  		val = MMA8652_CatchSensorData(i);
+  000e 95       [2]             TSX   
+  000f e601     [3]             LDA   1,X
+  0011 ac000000 [8]             CALL  MMA8652_CatchSensorData
+  0015 9eff0a   [5]             STHX  10,SP
+ 1232:  		switch(i){
+  0018 95       [2]             TSX   
+  0019 e601     [3]             LDA   1,X
+  001b a103     [2]             CMP   #3
+  001d 2251     [3]             BHI   L70 ;abs = 0070
+  001f 410109   [4]             CBEQA #1,L2B ;abs = 002b
+  0022 41021b   [4]             CBEQA #2,L40 ;abs = 0040
+  0025 a103     [2]             CMP   #3
+  0027 2647     [3]             BNE   L70 ;abs = 0070
+  0029 202a     [3]             BRA   L55 ;abs = 0055
+  002b          L2B:    
+ 1233:  		case 1:
+ 1234:  			x_avg = (x_avg * sens_count + val)/(sens_count + 1);
+  002b 320000   [5]             LDHX  x_avg
+  002e ac0001a4 [8]             CALL  App_TransmitSensorData:420
+  0032 89       [2]             PSHX  
+  0033 8b       [2]             PSHH  
+  0034 ac000181 [8]             CALL  App_TransmitSensorData:385
+  0038 960000   [5]             STHX  x_avg
+ 1235:  			UartUtil_Print("MMA8652(2g: Int2,Float10) \n\rX axis : 0x", gAllowToBlock_d); 
+  003b 450000   [3]             LDHX  @"MMA8652(2g: Int2,Float10) \012\015X axis : 0x"
+ 1236:  			break;
+  003e 2028     [3]             BRA   L68 ;abs = 0068
+  0040          L40:    
+ 1237:  		case 2:
+ 1238:  			y_avg = (y_avg * sens_count + val)/(sens_count + 1);
+  0040 320000   [5]             LDHX  y_avg
+  0043 ac0001a4 [8]             CALL  App_TransmitSensorData:420
+  0047 89       [2]             PSHX  
+  0048 8b       [2]             PSHH  
+  0049 ac000181 [8]             CALL  App_TransmitSensorData:385
+  004d 960000   [5]             STHX  y_avg
+ 1239:  			UartUtil_Print(" /1024 [g]\n\rY axis : 0x", gAllowToBlock_d);  				
+  0050 450000   [3]             LDHX  @" /1024 [g]\012\015Y axis : 0x"
+ 1240:  			break;
+  0053 2013     [3]             BRA   L68 ;abs = 0068
+  0055          L55:    
+ 1241:  		case 3:
+ 1242:  			z_avg = (z_avg * sens_count + val)/(sens_count + 1);
+  0055 320000   [5]             LDHX  z_avg
+  0058 ac0001a4 [8]             CALL  App_TransmitSensorData:420
+  005c 89       [2]             PSHX  
+  005d 8b       [2]             PSHH  
+  005e ac000181 [8]             CALL  App_TransmitSensorData:385
+  0062 960000   [5]             STHX  z_avg
+ 1243:  			UartUtil_Print(" /1024 [g]\n\rZ axis : 0x", gAllowToBlock_d);  		
+  0065 450000   [3]             LDHX  @" /1024 [g]\012\015Z axis : 0x"
+  0068          L68:    
+  0068 ac0001b3 [8]             CALL  App_TransmitSensorData:435
+ 1244:  			break;
+  006c a702     [2]             AIS   #2
+  006e 2007     [3]             BRA   L77 ;abs = 0077
+  0070          L70:    
+ 1245:  		default:
+ 1246:  			UartUtil_Print("???????????????", gAllowToBlock_d);  		
+  0070 450000   [3]             LDHX  @"???????????????"
+  0073 ac0001b3 [8]             CALL  App_TransmitSensorData:435
+  0077          L77:    
+ 1247:  			break;
+ 1248:  		}
+ 1249:  		UartUtil_PrintHex((uint8_t *)&val, 2, 1);
+  0077 95       [2]             TSX   
+  0078 af09     [2]             AIX   #9
+  007a 89       [2]             PSHX  
+  007b 8b       [2]             PSHH  
+  007c ae02     [2]             LDX   #2
+  007e a601     [2]             LDA   #1
+  0080 ac000000 [8]             CALL  UartUtil_PrintHex
+  0084 a702     [2]             AIS   #2
+ 1250:  		if(i==3){
+  0086 95       [2]             TSX   
+  0087 e601     [3]             LDA   1,X
+  0089 a103     [2]             CMP   #3
+  008b 2607     [3]             BNE   L94 ;abs = 0094
+ 1251:  			UartUtil_Print(" /1024 [g]", gAllowToBlock_d);  					
+  008d 450000   [3]             LDHX  @" /1024 [g]"
+  0090 ac0001b3 [8]             CALL  App_TransmitSensorData:435
+  0094          L94:    
+  0094 95       [2]             TSX   
+  0095 6c01     [5]             INC   1,X
+  0097 e601     [3]             LDA   1,X
+  0099 a104     [2]             CMP   #4
+  009b 2403     [3]             BCC   LA0 ;abs = 00a0
+  009d cc000e   [4]             JMP   LE ;abs = 000e
+  00a0          LA0:    
+ 1252:  		}
+ 1253:  	}
+ 1254:  
+ 1255:  	UartUtil_Print("\n\r-----------------------------------------------\n\r", gAllowToBlock_d); 
+  00a0 450000   [3]             LDHX  @"\012\015-----------------------------------------------\012\015"
+  00a3 ac0001b3 [8]             CALL  App_TransmitSensorData:435
+ 1256:  
+ 1257:  	sens_count++;
+  00a7 450000   [3]             LDHX  @sens_count
+  00aa 7c       [4]             INC   ,X
+ 1258:  
+ 1259:  	if (global_counter>=5){
+  00ab c60000   [4]             LDA   global_counter
+  00ae a105     [2]             CMP   #5
+  00b0 2403     [3]             BCC   LB5 ;abs = 00b5
+  00b2 cc017e   [4]             JMP   L17E ;abs = 017e
+  00b5          LB5:    
+ 1260:  		global_counter=0;
+  00b5 4f       [1]             CLRA  
+  00b6 c70000   [4]             STA   global_counter
+ 1261:  
+ 1262:  		sens_data[0]=0x81;
+  00b9 a681     [2]             LDA   #-127
+  00bb 95       [2]             TSX   
+  00bc e702     [3]             STA   2,X
+ 1263:  		sens_data[1]=(x_avg >> 8) & 0xFF;
+  00be c60000   [4]             LDA   x_avg
+  00c1 e703     [3]             STA   3,X
+ 1264:  		sens_data[2]=x_avg & 0xFF;
+  00c3 c60001   [4]             LDA   x_avg:1
+  00c6 e704     [3]             STA   4,X
+ 1265:  		sens_data[3]=(y_avg >> 8) & 0xFF;
+  00c8 c60000   [4]             LDA   y_avg
+  00cb e705     [3]             STA   5,X
+ 1266:  		sens_data[4]=y_avg & 0xFF;
+  00cd c60001   [4]             LDA   y_avg:1
+  00d0 e706     [3]             STA   6,X
+ 1267:  		sens_data[5]=(z_avg >> 8) & 0xFF;
+  00d2 c60000   [4]             LDA   z_avg
+  00d5 e707     [3]             STA   7,X
+ 1268:  		sens_data[6]=z_avg & 0xFF;
+  00d7 c60001   [4]             LDA   z_avg:1
+  00da e708     [3]             STA   8,X
+ 1269:  
+ 1270:  		UartUtil_Print("\n\r***************Average*************\n\r", gAllowToBlock_d); 
+  00dc 450000   [3]             LDHX  @"\012\015***************Average*************\012\015"
+  00df ac0001b3 [8]             CALL  App_TransmitSensorData:435
+ 1271:  
+ 1272:  		for(i=1; i<4; i++){
+  00e3 a601     [2]             LDA   #1
+  00e5 95       [2]             TSX   
+  00e6 e701     [3]             STA   1,X
+  00e8          LE8:    
+ 1273:  			switch(i){			
+  00e8 95       [2]             TSX   
+  00e9 e601     [3]             LDA   1,X
+  00eb a103     [2]             CMP   #3
+  00ed 221b     [3]             BHI   L10A ;abs = 010a
+  00ef 410109   [4]             CBEQA #1,LFB ;abs = 00fb
+  00f2 41020b   [4]             CBEQA #2,L100 ;abs = 0100
+  00f5 a103     [2]             CMP   #3
+  00f7 2611     [3]             BNE   L10A ;abs = 010a
+  00f9 200a     [3]             BRA   L105 ;abs = 0105
+  00fb          LFB:    
+ 1274:  			case 1:
+ 1275:  				UartUtil_Print("MMA8652(2g: Int2,Float10) \n\rX axis : 0x", gAllowToBlock_d); 
+  00fb 450000   [3]             LDHX  @"MMA8652(2g: Int2,Float10) \012\015X axis : 0x"
+ 1276:  				break;
+  00fe 200d     [3]             BRA   L10D ;abs = 010d
+  0100          L100:   
+ 1277:  			case 2:
+ 1278:  				UartUtil_Print(" /1024 [g]\n\rY axis : 0x", gAllowToBlock_d);  
+  0100 450000   [3]             LDHX  @" /1024 [g]\012\015Y axis : 0x"
+ 1279:  				break;
+  0103 2008     [3]             BRA   L10D ;abs = 010d
+  0105          L105:   
+ 1280:  			case 3:
+ 1281:  				UartUtil_Print(" /1024 [g]\n\rZ axis : 0x", gAllowToBlock_d);  		
+  0105 450000   [3]             LDHX  @" /1024 [g]\012\015Z axis : 0x"
+ 1282:  				break;
+  0108 2003     [3]             BRA   L10D ;abs = 010d
+  010a          L10A:   
+ 1283:  			default:
+ 1284:  				UartUtil_Print("???????????????", gAllowToBlock_d);  		
+  010a 450000   [3]             LDHX  @"???????????????"
+  010d          L10D:   
+  010d ac0001b3 [8]             CALL  App_TransmitSensorData:435
+ 1285:  				break;
+ 1286:  			}//switch(i){	 	
+ 1287:  
+ 1288:  			UartUtil_PrintHex((uint8_t *)&sens_data[2*i-1], 2, 1); 	
+  0111 95       [2]             TSX   
+  0112 e601     [3]             LDA   1,X
+  0114 48       [1]             LSLA  
+  0115 af02     [2]             AIX   #2
+  0117 4a       [1]             DECA  
+  0118 9ee701   [4]             STA   1,SP
+  011b 9f       [1]             TXA   
+  011c 9eeb01   [4]             ADD   1,SP
+  011f 87       [2]             PSHA  
+  0120 8b       [2]             PSHH  
+  0121 86       [3]             PULA  
+  0122 a900     [2]             ADC   #0
+  0124 87       [2]             PSHA  
+  0125 ae02     [2]             LDX   #2
+  0127 a601     [2]             LDA   #1
+  0129 ac000000 [8]             CALL  UartUtil_PrintHex
+  012d a702     [2]             AIS   #2
+ 1289:  
+ 1290:  			if(i==3){
+  012f 95       [2]             TSX   
+  0130 e601     [3]             LDA   1,X
+  0132 a103     [2]             CMP   #3
+  0134 2607     [3]             BNE   L13D ;abs = 013d
+ 1291:  				UartUtil_Print(" /1024 [g]", gAllowToBlock_d);  					
+  0136 450000   [3]             LDHX  @" /1024 [g]"
+  0139 ac0001b3 [8]             CALL  App_TransmitSensorData:435
+  013d          L13D:   
+  013d 95       [2]             TSX   
+  013e 6c01     [5]             INC   1,X
+  0140 e601     [3]             LDA   1,X
+  0142 a104     [2]             CMP   #4
+  0144 25a2     [3]             BCS   LE8 ;abs = 00e8
+ 1292:  			}
+ 1293:  
+ 1294:  		} //for(i=1; i<4; i++){
+ 1295:  
+ 1296:  
+ 1297:  		UartUtil_Print("\n\r*********************************\n\r", gAllowToBlock_d); 		
+  0146 450000   [3]             LDHX  @"\012\015*********************************\012\015"
+  0149 ac0001b3 [8]             CALL  App_TransmitSensorData:435
+ 1298:  
+ 1299:  
+ 1300:  		GenandTransData(7, sens_data, (void*)mCoordInfo.coordAddress);
+  014d a607     [2]             LDA   #7
+  014f 87       [2]             PSHA  
+  0150 95       [2]             TSX   
+  0151 af03     [2]             AIX   #3
+  0153 89       [2]             PSHX  
+  0154 8b       [2]             PSHH  
+  0155 450000   [3]             LDHX  @mCoordInfo
+  0158 ac000000 [8]             CALL  GenandTransData
+  015c a703     [2]             AIS   #3
+ 1301:  		sens_count=0;
+  015e 4f       [1]             CLRA  
+  015f c70000   [4]             STA   sens_count
+ 1302:  		for(i=0;i<7;i++){
+  0162 95       [2]             TSX   
+  0163 6f01     [5]             CLR   1,X
+  0165          L165:   
+ 1303:  			sens_data[i]=0;
+  0165 95       [2]             TSX   
+  0166 af02     [2]             AIX   #2
+  0168 9f       [1]             TXA   
+  0169 9eeb02   [4]             ADD   2,SP
+  016c 87       [2]             PSHA  
+  016d 8b       [2]             PSHH  
+  016e 86       [3]             PULA  
+  016f a900     [2]             ADC   #0
+  0171 87       [2]             PSHA  
+  0172 8a       [3]             PULH  
+  0173 88       [3]             PULX  
+  0174 7f       [4]             CLR   ,X
+  0175 95       [2]             TSX   
+  0176 6c01     [5]             INC   1,X
+  0178 e601     [3]             LDA   1,X
+  017a a107     [2]             CMP   #7
+  017c 25e7     [3]             BCS   L165 ;abs = 0165
+  017e          L17E:   
+ 1304:  		}
+ 1305:  	}
+ 1306:  	
+ 1307:  }
+  017e a70b     [2]             AIS   #11
+  0180 8d       [7]             RTC   
+  0181          L181:   
+  0181 9efe0f   [5]             LDHX  15,SP
+  0184 9f       [1]             TXA   
+  0185 8b       [2]             PSHH  
+  0186 95       [2]             TSX   
+  0187 eb05     [3]             ADD   5,X
+  0189 e705     [3]             STA   5,X
+  018b 86       [3]             PULA  
+  018c e904     [3]             ADC   4,X
+  018e ee06     [3]             LDX   6,X
+  0190 8c       [1]             CLRH  
+  0191 af01     [2]             AIX   #1
+  0193 9ee706   [4]             STA   6,SP
+  0196 9ee605   [4]             LDA   5,SP
+  0199 87       [2]             PSHA  
+  019a 9ee607   [4]             LDA   7,SP
+  019d 87       [2]             PSHA  
+  019e cd0000   [6]             JSR   _IDIVS_STAR08
+  01a1 a702     [2]             AIS   #2
+  01a3 8d       [7]             RTC   
+  01a4          L1A4:   
+  01a4 89       [2]             PSHX  
+  01a5 8b       [2]             PSHH  
+  01a6 ce0000   [4]             LDX   sens_count
+  01a9 8c       [1]             CLRH  
+  01aa 9eef06   [4]             STX   6,SP
+  01ad cd0000   [6]             JSR   _IMUL_STAR08
+  01b0 a702     [2]             AIS   #2
+  01b2 8d       [7]             RTC   
+  01b3          L1B3:   
+  01b3 a601     [2]             LDA   #1
+  01b5 ac000000 [8]             CALL  UartUtil_Print
+  01b9 8d       [7]             RTC   
+ 1308:  
+ 1309:  static void GenandTransData(uint8_t Length, uint8_t* pTxData, uint8_t* dest_addr){
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+ 1310:   
+ 1311:  	/* Use multi buffering for increased TX performance. It does not really
+ 1312:       have any effect at a UART baud rate of 19200bps but serves as an
+ 1313:       example of how the throughput may be improved in a real-world 
+ 1314:       application where the data rate is of concern. */
+ 1315:    if( (mcPendingPackets < mDefaultValueOfMaxPendingDataPackets_c) && (mpPacket == NULL) ) 
+  0002 c60000   [4]             LDA   mcPendingPackets
+  0005 a102     [2]             CMP   #2
+  0007 240e     [3]             BCC   L17 ;abs = 0017
+  0009 320000   [5]             LDHX  mpPacket
+  000c 2609     [3]             BNE   L17 ;abs = 0017
+ 1316:    {
+ 1317:      /* If the maximum number of pending data buffes is below maximum limit 
+ 1318:         and we do not have a data buffer already then allocate one. */
+ 1319:      mpPacket = MSG_Alloc(gMaxRxTxDataLength_c);
+  000e a68d     [2]             LDA   #-115
+  0010 ac000000 [8]             CALL  MM_Alloc
+  0014 960000   [5]             STHX  mpPacket
+  0017          L17:    
+ 1320:    }
+ 1321:    
+ 1322:    if(mpPacket != NULL)
+  0017 320000   [5]             LDHX  mpPacket
+  001a 277e     [3]             BEQ   L9A ;abs = 009a
+ 1323:    {
+ 1324:      /* get data from UART */        
+ 1325:        mpPacket->msgData.dataReq.pMsdu = (uint8_t*)(&(mpPacket->msgData.dataReq.pMsdu)) + sizeof(uint8_t*);
+  001c af1c     [2]             AIX   #28
+  001e 9f       [1]             TXA   
+  001f 8b       [2]             PSHH  
+  0020 320000   [5]             LDHX  mpPacket
+  0023 e71b     [3]             STA   27,X
+  0025 86       [3]             PULA  
+  0026 e71a     [3]             STA   26,X
+ 1326:        FLib_MemCpy(mpPacket->msgData.dataReq.pMsdu, (uint8_t*) pTxData, Length);
+  0028 9ece1a   [5]             LDHX  26,X
+  002b 89       [2]             PSHX  
+  002c 8b       [2]             PSHH  
+  002d 9efe08   [5]             LDHX  8,SP
+  0030 9ee60a   [4]             LDA   10,SP
+  0033 ac000000 [8]             CALL  FLib_MemCpy
+  0037 a702     [2]             AIS   #2
+ 1327:        /* Data was available in the UART receive buffer. Now create an
+ 1328:           MCPS-Data Request message containing the UART data. */
+ 1329:        mpPacket->msgType = gMcpsDataReq_c;
+  0039 320000   [5]             LDHX  mpPacket
+  003c 7f       [4]             CLR   ,X
+ 1330:        /* Create the header using coordinator information gained during 
+ 1331:           the scan procedure. Also use the short address we were assigned
+ 1332:           by the coordinator during association. */
+ 1333:        FLib_MemCpy(mpPacket->msgData.dataReq.dstAddr,dest_addr, 8);
+  003d af01     [2]             AIX   #1
+  003f 89       [2]             PSHX  
+  0040 8b       [2]             PSHH  
+  0041 9efe03   [5]             LDHX  3,SP
+  0044 a608     [2]             LDA   #8
+  0046 ac000000 [8]             CALL  FLib_MemCpy
+  004a a702     [2]             AIS   #2
+ 1334:        FLib_MemCpy(mpPacket->msgData.dataReq.srcAddr, maMyAddress, 8);
+  004c 320000   [5]             LDHX  mpPacket
+  004f af0c     [2]             AIX   #12
+  0051 89       [2]             PSHX  
+  0052 8b       [2]             PSHH  
+  0053 450000   [3]             LDHX  @maMyAddress
+  0056 a608     [2]             LDA   #8
+  0058 ac000000 [8]             CALL  FLib_MemCpy
+  005c a702     [2]             AIS   #2
+ 1335:        FLib_MemCpy(mpPacket->msgData.dataReq.dstPanId, mCoordInfo.coordPanId, 2);
+  005e 320000   [5]             LDHX  mpPacket
+  0061 af09     [2]             AIX   #9
+  0063 ac00009d [8]             CALL  GenandTransData:157
+ 1336:        FLib_MemCpy(mpPacket->msgData.dataReq.srcPanId, mCoordInfo.coordPanId, 2);
+  0067 320000   [5]             LDHX  mpPacket
+  006a af14     [2]             AIX   #20
+  006c ac00009d [8]             CALL  GenandTransData:157
+ 1337:        mpPacket->msgData.dataReq.dstAddrMode = mCoordInfo.coordAddrMode;
+  0070 c6000a   [4]             LDA   mCoordInfo:10
+  0073 320000   [5]             LDHX  mpPacket
+  0076 e70b     [3]             STA   11,X
+ 1338:        mpPacket->msgData.dataReq.srcAddrMode = mAddrMode;
+  0078 c60000   [4]             LDA   mAddrMode
+  007b e716     [3]             STA   22,X
+ 1339:        mpPacket->msgData.dataReq.msduLength = Length;
+  007d 9ee608   [4]             LDA   8,SP
+  0080 e717     [3]             STA   23,X
+ 1340:        /* Request MAC level acknowledgement of the data packet */
+ 1341:        mpPacket->msgData.dataReq.txOptions = 0;
+  0082 6f19     [5]             CLR   25,X
+ 1342:        /* Give the data packet a handle. The handle is
+ 1343:           returned in the MCPS-Data Confirm message. */
+ 1344:        mpPacket->msgData.dataReq.msduHandle = mMsduHandle++;
+  0084 c60000   [4]             LDA   mMsduHandle
+  0087 e718     [3]             STA   24,X
+  0089 4c       [1]             INCA  
+  008a c70000   [4]             STA   mMsduHandle
+ 1345:  #ifdef gMAC2006_d
+ 1346:  	  mpPacket->msgData.dataReq.securityLevel = 0;
+ 1347:  #endif //gMAC2006_d	  
+ 1348:        
+ 1349:        /* Send the Data Request to the MCPS */
+ 1350:        (void)MSG_Send(NWK_MCPS, mpPacket);
+  008d ac000000 [8]             CALL  NWK_MCPS_SapHandler
+ 1351:        /* Prepare for another data buffer */
+ 1352:        mpPacket = NULL;
+  0091 5f       [1]             CLRX  
+  0092 8c       [1]             CLRH  
+  0093 960000   [5]             STHX  mpPacket
+ 1353:        mcPendingPackets++;
+  0096 450000   [3]             LDHX  @mcPendingPackets
+  0099 7c       [4]             INC   ,X
+  009a          L9A:    
+ 1354:    }
+ 1355:     
+ 1356:  
+ 1357:  }
+  009a a702     [2]             AIS   #2
+  009c 8d       [7]             RTC   
+  009d          L9D:    
+  009d 89       [2]             PSHX  
+  009e 8b       [2]             PSHH  
+  009f 450008   [3]             LDHX  @mCoordInfo:8
+  00a2 a602     [2]             LDA   #2
+  00a4 ac000000 [8]             CALL  FLib_MemCpy
+  00a8 a702     [2]             AIS   #2
+  00aa 8d       [7]             RTC   
+ 1358:  
+ 1359:  /*****************************************************************************
+ 1360:  * Function to handle a generic key press. Called for all keys.
+ 1361:  *****************************************************************************/
+ 1362:  static void App_HandleGenericKey(void)
+ 1363:  {
+ 1364:    if(gState == stateInit)
+  0000 c60000   [4]             LDA   gState
+  0003 262a     [3]             BNE   L2F ;abs = 002f
+ 1365:    {
+ 1366:     StopLed1Flashing();
+  0005 a601     [2]             LDA   #1
+  0007 ac000000 [8]             CALL  LED_StopFlash
+ 1367:     StopLed2Flashing();
+  000b a602     [2]             LDA   #2
+  000d ac000000 [8]             CALL  LED_StopFlash
+ 1368:     StopLed3Flashing();
+  0011 a604     [2]             LDA   #4
+  0013 ac000000 [8]             CALL  LED_StopFlash
+ 1369:     StopLed4Flashing();
+  0017 a608     [2]             LDA   #8
+  0019 ac000000 [8]             CALL  LED_StopFlash
+ 1370:     Led1Off();
+  001d 1000     [5]             BSET  0,0
+ 1371:     Led2Off();
+  001f 1800     [5]             BSET  4,0
+ 1372:     Led3Off();
+  0021 1006     [5]             BSET  0,6
+ 1373:     Led4Off();
+  0023 1206     [5]             BSET  1,6
+ 1374:     LCD_ClearDisplay();
+ 1375:     LCD_WriteString(1,"Application");
+ 1376:     LCD_WriteString(2,"    started");     
+ 1377:     TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);       
+  0025 c60000   [4]             LDA   gAppTaskID_c
+  0028 ae01     [2]             LDX   #1
+  002a 8c       [1]             CLRH  
+  002b ac000000 [8]             CALL  TS_SendEvent
+  002f          L2F:    
+ 1378:    }
+ 1379:  }
+  002f 8d       [7]             RTC   
+ 1380:  
+ 1381:  /*****************************************************************************
+ 1382:  * Handles all key events for this device.
+ 1383:  * Interface assumptions: None
+ 1384:  * Return value: None
+ 1385:  *****************************************************************************/
+ 1386:  #if (gMC1323xMatrixKBD_d == TRUE)
+ 1387:  static void App_HandleKeys(uint8_t events, uint8_t pressedKey)   
+ 1388:  {
+ 1389:   (void)events;
+ 1390:   (void)pressedKey;
+ 1391:   App_HandleGenericKey();
+  0000 ac000000 [8]             CALL  App_HandleGenericKey
+ 1392:  }
+  0004 8d       [7]             RTC   
+ 1393:  #else
+ 1394:  static void App_HandleKeys(key_event_t events)
+ 1395:  {
+ 1396:    switch ( events ) 
+ 1397:      { 
+ 1398:        case gKBD_EventSW1_c:
+ 1399:        case gKBD_EventSW2_c:
+ 1400:        case gKBD_EventSW3_c:
+ 1401:        case gKBD_EventSW4_c:
+ 1402:        case gKBD_EventLongSW1_c:
+ 1403:        case gKBD_EventLongSW2_c:
+ 1404:        case gKBD_EventLongSW3_c:
+ 1405:        case gKBD_EventLongSW4_c:
+ 1406:         App_HandleGenericKey();
+ 1407:  	  break; 
+ 1408:      }    
+ 1409:  }
+ 1410:  #endif //gMC1323xMatrixKBD_d
+ 1411:  
+ 1412:  /*****************************************************************************
+ 1413:  * The DeepSleepWakeupStackProc(void) function is called each time the 
+ 1414:  * application exits the DeepSleep mode .
+ 1415:  * 
+ 1416:  * Return value:
+ 1417:  *     None
+ 1418:  *****************************************************************************/
+ 1419:  void DeepSleepWakeupStackProc(void){
+ 1420:    return;
+ 1421:  }
+  0000 8d       [7]             RTC   
+ 1422:  
+ 1423:  /******************************************************************************
+ 1424:  * The following functions are called by the MAC to put messages into the
+ 1425:  * Application's queue. They need to be defined even if they are not used
+ 1426:  * in order to avoid linker errors.
+ 1427:  ******************************************************************************/
+ 1428:  
+ 1429:  uint8_t MLME_NWK_SapHandler(nwkMessage_t * pMsg)
+ 1430:  {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+ 1431:    /* Put the incoming MLME message in the applications input queue. */
+ 1432:    MSG_Queue(&mMlmeNwkInputQueue, pMsg);
+  0002 450000   [3]             LDHX  @mMlmeNwkInputQueue
+  0005 89       [2]             PSHX  
+  0006 8b       [2]             PSHH  
+  0007 9efe03   [5]             LDHX  3,SP
+  000a ac000000 [8]             CALL  List_AddTail
+  000e a702     [2]             AIS   #2
+ 1433:    TS_SendEvent(gAppTaskID_c, gAppEvtMessageFromMLME_c);
+  0010 c60000   [4]             LDA   gAppTaskID_c
+  0013 ae04     [2]             LDX   #4
+  0015 8c       [1]             CLRH  
+  0016 ac000000 [8]             CALL  TS_SendEvent
+ 1434:    return gSuccess_c;
+  001a 4f       [1]             CLRA  
+ 1435:  }
+  001b a702     [2]             AIS   #2
+  001d 8d       [7]             RTC   
+ 1436:  
+ 1437:  uint8_t MCPS_NWK_SapHandler(mcpsToNwkMessage_t *pMsg)
+ 1438:  {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+ 1439:    /* Put the incoming MCPS message in the applications input queue. */
+ 1440:    MSG_Queue(&mMcpsNwkInputQueue, pMsg);
+  0002 450000   [3]             LDHX  @mMcpsNwkInputQueue
+  0005 89       [2]             PSHX  
+  0006 8b       [2]             PSHH  
+  0007 9efe03   [5]             LDHX  3,SP
+  000a ac000000 [8]             CALL  List_AddTail
+  000e a702     [2]             AIS   #2
+ 1441:    TS_SendEvent(gAppTaskID_c, gAppEvtMessageFromMCPS_c);
+  0010 c60000   [4]             LDA   gAppTaskID_c
+  0013 ae08     [2]             LDX   #8
+  0015 8c       [1]             CLRH  
+  0016 ac000000 [8]             CALL  TS_SendEvent
+ 1442:    return gSuccess_c;
+  001a 4f       [1]             CLRA  
+ 1443:  }
+  001b a702     [2]             AIS   #2
+  001d 8d       [7]             RTC   
+ 1444:  
+ 1445:  uint8_t ASP_APP_SapHandler(aspToAppMsg_t *pMsg)
+ 1446:  {
+ 1447:    /* If the message is not handled anywhere it must be freed. */
+ 1448:    MSG_Free(pMsg);
+  0000 ac000000 [8]             CALL  MM_Free
+ 1449:    return gSuccess_c;
+  0004 4f       [1]             CLRA  
+ 1450:  }
+  0005 8d       [7]             RTC   
+ 1451:  
+ 1452:  /******************************************************************************
+ 1453:  * The App_StartScan(scanType) function will start the scan process of the
+ 1454:  * specified type in the MAC. This is accomplished by allocating a MAC message,
+ 1455:  * which is then assigned the desired scan parameters and sent to the MLME
+ 1456:  * service access point. The MAC PIB attributes "macShortAddress", and 
+ 1457:  * "macAssociatePermit" are modified.
+ 1458:  *
+ 1459:  * The function may return either of the following values:
+ 1460:  *   errorNoError:          The Scan message was sent successfully.
+ 1461:  *   errorInvalidParameter: The MLME service access point rejected the
+ 1462:  *                          message due to an invalid parameter.
+ 1463:  *   errorAllocFailed:      A message buffer could not be allocated.
+ 1464:  *
+ 1465:  ******************************************************************************/
+ 1466:  static uint8_t App_StartRooter(void)
+ 1467:  {
+  0000 a7fb     [2]             AIS   #-5
+ 1468:    /* Message for the MLME will be allocated and attached to this pointer */
+ 1469:    mlmeMessage_t *pMsg;
+ 1470:  
+ 1471:    UartUtil_Print("Sending the MLME-Start Request message to the MAC...", gAllowToBlock_d);
+  0002 450000   [3]             LDHX  @"Sending the MLME-Start Request message to the MAC..."
+  0005 ac0000af [8]             CALL  App_StartRooter:175
+ 1472:    
+ 1473:    /* Allocate a message for the MLME (We should check for NULL). */
+ 1474:    pMsg = MSG_AllocType(mlmeMessage_t);
+  0009 a60f     [2]             LDA   #15
+  000b ac000000 [8]             CALL  MM_Alloc
+  000f 9eff01   [5]             STHX  1,SP
+ 1475:    if(pMsg != NULL)
+  0012 2603     [3]             BNE   L17 ;abs = 0017
+  0014 cc00a3   [4]             JMP   LA3 ;abs = 00a3
+  0017          L17:    
+ 1476:    {
+ 1477:      /* Pointer which is used for easy access inside the allocated message */
+ 1478:      mlmeStartReq_t *pStartReq;
+ 1479:      /* Return value from MSG_send - used for avoiding compiler warnings */
+ 1480:      uint8_t ret;
+ 1481:      /* Boolean value that will be written to the MAC PIB */
+ 1482:      uint8_t boolFlag;
+ 1483:      
+ 1484:      /* Set-up MAC PIB attributes. Please note that Set, Get,
+ 1485:         and Reset messages are not freed by the MLME. */
+ 1486:      
+ 1487:      /* We must always set the short address to something
+ 1488:         else than 0xFFFF before starting a PAN. */
+ 1489:      pMsg->msgType = gMlmeSetReq_c;
+  0017 a609     [2]             LDA   #9
+  0019 f7       [2]             STA   ,X
+ 1490:      pMsg->msgData.setReq.pibAttribute = gMPibShortAddress_c;
+  001a a653     [2]             LDA   #83
+  001c e701     [3]             STA   1,X
+ 1491:      pMsg->msgData.setReq.pibAttributeValue = (uint8_t *)maShortAddress;
+  001e a600     [2]             LDA   @maShortAddress:MSB
+  0020 e702     [3]             STA   2,X
+  0022 a600     [2]             LDA   @maShortAddress
+  0024 e703     [3]             STA   3,X
+ 1492:      ret = MSG_Send(NWK_MLME, pMsg);
+  0026 89       [2]             PSHX  
+  0027 8b       [2]             PSHH  
+  0028 ac000000 [8]             CALL  NWK_MLME_SapHandler
+ 1493:      
+ 1494:      /* We must set the Association Permit flag to TRUE 
+ 1495:         in order to allow devices to associate to us. */
+ 1496:      pMsg->msgType = gMlmeSetReq_c;
+  002c 9efe01   [5]             LDHX  1,SP
+  002f a609     [2]             LDA   #9
+  0031 f7       [2]             STA   ,X
+ 1497:      pMsg->msgData.setReq.pibAttribute = gMPibAssociationPermit_c;
+  0032 a641     [2]             LDA   #65
+  0034 e701     [3]             STA   1,X
+ 1498:      boolFlag = TRUE;
+  0036 a601     [2]             LDA   #1
+  0038 95       [2]             TSX   
+  0039 e704     [3]             STA   4,X
+ 1499:      pMsg->msgData.setReq.pibAttributeValue = &boolFlag;
+  003b af04     [2]             AIX   #4
+  003d 8b       [2]             PSHH  
+  003e 9ee602   [4]             LDA   2,SP
+  0041 87       [2]             PSHA  
+  0042 8a       [3]             PULH  
+  0043 9f       [1]             TXA   
+  0044 9eee03   [4]             LDX   3,SP
+  0047 e703     [3]             STA   3,X
+  0049 86       [3]             PULA  
+  004a e702     [3]             STA   2,X
+ 1500:      ret = MSG_Send(NWK_MLME, pMsg);
+  004c ac000000 [8]             CALL  NWK_MLME_SapHandler
+ 1501:      
+ 1502:      /* This is a MLME-START.req command */
+ 1503:      pMsg->msgType = gMlmeStartReq_c;
+  0050 9efe03   [5]             LDHX  3,SP
+  0053 a60a     [2]             LDA   #10
+  0055 f7       [2]             STA   ,X
+ 1504:      
+ 1505:      /* Create the Start request message data. */
+ 1506:      pStartReq = &pMsg->msgData.startReq;
+  0056 af01     [2]             AIX   #1
+  0058 9eff06   [5]             STHX  6,SP
+ 1507:      /* PAN ID - LSB, MSB. The example shows a PAN ID of 0xBEEF. */
+ 1508:      FLib_MemCpy(pStartReq->panId, (void *)maPanId, 2);
+  005b 89       [2]             PSHX  
+  005c 8b       [2]             PSHH  
+  005d 450000   [3]             LDHX  @maPanId
+  0060 a602     [2]             LDA   #2
+  0062 ac000000 [8]             CALL  FLib_MemCpy
+  0066 a702     [2]             AIS   #2
+ 1509:      /* Logical Channel - the default of 11 will be overridden */
+ 1510:      pStartReq->logicalChannel = mLogicalChannel;
+  0068 9efe06   [5]             LDHX  6,SP
+  006b c60000   [4]             LDA   mLogicalChannel
+  006e e702     [3]             STA   2,X
+ 1511:      /* Beacon Order: 0xF = turn off beacons, less than 0xF = turn on beacons */
+ 1512:      pStartReq->beaconOrder = 0x0F;  
+  0070 a60f     [2]             LDA   #15
+  0072 e703     [3]             STA   3,X
+ 1513:      /* Superframe Order: Must be equal or less than the beacon order */
+ 1514:      pStartReq->superFrameOrder = mDefaultValueOfSuperframeOrder_c;
+  0074 a606     [2]             LDA   #6
+  0076 e704     [3]             STA   4,X
+ 1515:      /* Be a PAN coordinator */
+ 1516:      pStartReq->panCoordinator = TRUE;
+  0078 a601     [2]             LDA   #1
+  007a e705     [3]             STA   5,X
+ 1517:      /* Dont use battery life extension */
+ 1518:      pStartReq->batteryLifeExt = FALSE;
+  007c 6f06     [5]             CLR   6,X
+ 1519:      /* This is not a Realignment command */
+ 1520:      pStartReq->coordRealignment = FALSE;
+  007e 6f07     [5]             CLR   7,X
+ 1521:      /* Dont use security */
+ 1522:  #ifndef gMAC2006_d	
+ 1523:      pStartReq->securityEnable = FALSE;
+  0080 6f08     [5]             CLR   8,X
+ 1524:  #else
+ 1525:  	pStartReq->coordRealignSecurityLevel = 0;
+ 1526:    pStartReq->beaconSecurityLevel = 0;	
+ 1527:  #endif //gMAC2006_d	
+ 1528:        
+ 1529:      /* Send the Start request to the MLME. */
+ 1530:      if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
+  0082 9efe03   [5]             LDHX  3,SP
+  0085 ac000000 [8]             CALL  NWK_MLME_SapHandler
+  0089 4d       [1]             TSTA  
+  008a a702     [2]             AIS   #2
+  008c 260a     [3]             BNE   L98 ;abs = 0098
+ 1531:      {
+ 1532:        UartUtil_Print("Done\n\r", gAllowToBlock_d);
+  008e 450000   [3]             LDHX  @"Done\012\015"
+  0091 ac0000af [8]             CALL  App_StartRooter:175
+ 1533:        return errorNoError;
+  0095 4f       [1]             CLRA  
+  0096 2014     [3]             BRA   LAC ;abs = 00ac
+  0098          L98:    
+ 1534:      }
+ 1535:      else
+ 1536:      {
+ 1537:        /* One or more parameters in the Start Request message were invalid. */
+ 1538:        UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
+  0098 450000   [3]             LDHX  @"Invalid parameter!\012\015"
+  009b ac0000af [8]             CALL  App_StartRooter:175
+ 1539:        return errorInvalidParameter;
+  009f a605     [2]             LDA   #5
+  00a1 2009     [3]             BRA   LAC ;abs = 00ac
+  00a3          LA3:    
+ 1540:      }
+ 1541:    }
+ 1542:    else
+ 1543:    {
+ 1544:      /* Allocation of a message buffer failed. */
+ 1545:      UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
+  00a3 450000   [3]             LDHX  @"Message allocation failed!\012\015"
+  00a6 ac0000af [8]             CALL  App_StartRooter:175
+ 1546:      return errorAllocFailed;
+  00aa a604     [2]             LDA   #4
+  00ac          LAC:    
+ 1547:    }
+ 1548:  }
+  00ac a705     [2]             AIS   #5
+  00ae 8d       [7]             RTC   
+  00af          LAF:    
+  00af a601     [2]             LDA   #1
+  00b1 ac000000 [8]             CALL  UartUtil_Print
+  00b5 8d       [7]             RTC   
+ 1549:  
+ 1550:  
+ 1551:  /******************************************************************************
+ 1552:  * The App_SendAssociateResponse(nwkMessage_t *pMsgIn) will create the response
+ 1553:  * message to an Associate Indication (device sends an Associate Request to its
+ 1554:  * MAC. The request is transmitted to the coordinator where it is converted into
+ 1555:  * an Associate Indication). This function will extract the devices long address,
+ 1556:  * and various other flags from the incoming indication message for building the
+ 1557:  * response message.
+ 1558:  *
+ 1559:  * The function may return either of the following values:
+ 1560:  *   errorNoError:          The Associate Response message was sent successfully.
+ 1561:  *   errorInvalidParameter: The MLME service access point rejected the
+ 1562:  *                          message due to an invalid parameter.
+ 1563:  *   errorAllocFailed:      A message buffer could not be allocated.
+ 1564:  *
+ 1565:  ******************************************************************************/
+ 1566:  static uint8_t App_SendAssociateResponse(nwkMessage_t *pMsgIn)
+ 1567:  {
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 a7fc     [2]             AIS   #-4
+ 1568:    mlmeMessage_t *pMsg;
+ 1569:    mlmeAssociateRes_t *pAssocRes;
+ 1570:    
+ 1571:    static uint8_t nwk_addr;
+ 1572:   
+ 1573:    UartUtil_Print("Sending the MLME-Associate Response message to the MAC...", gAllowToBlock_d);
+  0004 450000   [3]             LDHX  @"Sending the MLME-Associate Response message to the MAC..."
+  0007 ac0000ad [8]             CALL  App_SendAssociateResponse:173
+ 1574:   
+ 1575:    /* Allocate a message for the MLME */
+ 1576:    pMsg = MSG_AllocType(mlmeMessage_t);
+  000b a60f     [2]             LDA   #15
+  000d ac000000 [8]             CALL  MM_Alloc
+  0011 9eff03   [5]             STHX  3,SP
+ 1577:    if(pMsg != NULL)
+  0014 2603     [3]             BNE   L19 ;abs = 0019
+  0016 cc00a1   [4]             JMP   LA1 ;abs = 00a1
+  0019          L19:    
+ 1578:    {
+ 1579:      /* This is a MLME-ASSOCIATE.res command */
+ 1580:      pMsg->msgType = gMlmeAssociateRes_c;
+  0019 a601     [2]             LDA   #1
+  001b f7       [2]             STA   ,X
+ 1581:      
+ 1582:      /* Create the Associate response message data. */
+ 1583:      pAssocRes = &pMsg->msgData.associateRes;
+  001c af01     [2]             AIX   #1
+ 1584:      
+ 1585:      /* Assign a short address to the device. In this example we simply
+ 1586:         choose 0x0001. Though, all devices and coordinators in a PAN must have
+ 1587:         different short addresses. However, if a device do not want to use 
+ 1588:         short addresses at all in the PAN, a short address of 0xFFFE must
+ 1589:         be assigned to it. */
+ 1590:      if(pMsgIn->msgData.associateInd.capabilityInfo & gCapInfoAllocAddr_c)
+  001e 9eff01   [5]             STHX  1,SP
+  0021 9efe05   [5]             LDHX  5,SP
+  0024 e60b     [3]             LDA   11,X
+  0026 2a15     [3]             BPL   L3D ;abs = 003d
+ 1591:      {
+ 1592:        /* Assign a unique short address less than 0xfffe if the device requests so. */
+ 1593:        pAssocRes->assocShortAddress[0] = nwk_addr;
+  0028 c60000   [4]             LDA   nwk_addr
+  002b 9efe01   [5]             LDHX  1,SP
+  002e e708     [3]             STA   8,X
+ 1594:        pAssocRes->assocShortAddress[1] = 0x01;
+  0030 a601     [2]             LDA   #1
+  0032 e709     [3]             STA   9,X
+ 1595:        nwk_addr += 1;
+  0034 450000   [3]             LDHX  @nwk_addr
+  0037 7c       [4]             INC   ,X
+ 1596:      }
+  0038 9efe01   [5]             LDHX  1,SP
+  003b 200a     [3]             BRA   L47 ;abs = 0047
+  003d          L3D:    
+ 1597:      else
+ 1598:      {
+ 1599:        /* A short address of 0xfffe means that the device is granted access to
+ 1600:           the PAN (Associate successful) but that long addressing is used.*/
+ 1601:        pAssocRes->assocShortAddress[0] = 0xFE;
+  003d a6fe     [2]             LDA   #-2
+  003f 9efe01   [5]             LDHX  1,SP
+  0042 e708     [3]             STA   8,X
+ 1602:        pAssocRes->assocShortAddress[1] = 0xFF;
+  0044 4c       [1]             INCA  
+  0045 e709     [3]             STA   9,X
+  0047          L47:    
+ 1603:      }
+ 1604:      /* Get the 64 bit address of the device requesting association. */
+ 1605:      FLib_MemCpy(pAssocRes->deviceAddress, pMsgIn->msgData.associateInd.deviceAddress, 8);
+  0047 89       [2]             PSHX  
+  0048 8b       [2]             PSHH  
+  0049 9eff03   [5]             STHX  3,SP
+  004c 9efe07   [5]             LDHX  7,SP
+  004f af01     [2]             AIX   #1
+  0051 a608     [2]             LDA   #8
+  0053 ac000000 [8]             CALL  FLib_MemCpy
+  0057 a702     [2]             AIS   #2
+ 1606:      /* Association granted. May also be gPanAtCapacity_c or gPanAccessDenied_c. */
+ 1607:      pAssocRes->status = gSuccess_c;
+  0059 9efe01   [5]             LDHX  1,SP
+  005c 6f0b     [5]             CLR   11,X
+ 1608:      /* Do not use security */
+ 1609:  #ifndef gMAC2006_d
+ 1610:      pAssocRes->securityEnable = FALSE;
+  005e 6f0a     [5]             CLR   10,X
+ 1611:  #else
+ 1612:  	pAssocRes->securityLevel = 0;
+ 1613:  #endif //gMAC2006_d	
+ 1614:      
+ 1615:      /* Save device info. */
+ 1616:      FLib_MemCpy(maDeviceShortAddress, pAssocRes->assocShortAddress, 2);
+  0060 450000   [3]             LDHX  @maDeviceShortAddress
+  0063 89       [2]             PSHX  
+  0064 8b       [2]             PSHH  
+  0065 9efe03   [5]             LDHX  3,SP
+  0068 af08     [2]             AIX   #8
+  006a a602     [2]             LDA   #2
+  006c ac000000 [8]             CALL  FLib_MemCpy
+  0070 a702     [2]             AIS   #2
+ 1617:      FLib_MemCpy(maDeviceLongAddress,  pAssocRes->deviceAddress,     8);
+  0072 450000   [3]             LDHX  @maDeviceLongAddress
+  0075 89       [2]             PSHX  
+  0076 8b       [2]             PSHH  
+  0077 9efe03   [5]             LDHX  3,SP
+  007a a608     [2]             LDA   #8
+  007c ac000000 [8]             CALL  FLib_MemCpy
+  0080 a702     [2]             AIS   #2
+ 1618:      
+ 1619:      /* Send the Associate Response to the MLME. */
+ 1620:      if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
+  0082 9efe03   [5]             LDHX  3,SP
+  0085 ac000000 [8]             CALL  NWK_MLME_SapHandler
+  0089 4d       [1]             TSTA  
+  008a 260a     [3]             BNE   L96 ;abs = 0096
+ 1621:      {
+ 1622:        UartUtil_Print("Done\n\r", gAllowToBlock_d);
+  008c 450000   [3]             LDHX  @"Done\012\015"
+  008f ac0000ad [8]             CALL  App_SendAssociateResponse:173
+ 1623:        return errorNoError;
+  0093 4f       [1]             CLRA  
+  0094 2014     [3]             BRA   LAA ;abs = 00aa
+  0096          L96:    
+ 1624:      }
+ 1625:      else
+ 1626:      {
+ 1627:        /* One or more parameters in the message were invalid. */
+ 1628:        UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
+  0096 450000   [3]             LDHX  @"Invalid parameter!\012\015"
+  0099 ac0000ad [8]             CALL  App_SendAssociateResponse:173
+ 1629:        return errorInvalidParameter;
+  009d a605     [2]             LDA   #5
+  009f 2009     [3]             BRA   LAA ;abs = 00aa
+  00a1          LA1:    
+ 1630:      }
+ 1631:    }
+ 1632:    else
+ 1633:    {
+ 1634:      /* Allocation of a message buffer failed. */
+ 1635:      UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
+  00a1 450000   [3]             LDHX  @"Message allocation failed!\012\015"
+  00a4 ac0000ad [8]             CALL  App_SendAssociateResponse:173
+ 1636:      return errorAllocFailed;
+  00a8 a604     [2]             LDA   #4
+  00aa          LAA:    
+ 1637:    }
+ 1638:  }
+  00aa a706     [2]             AIS   #6
+  00ac 8d       [7]             RTC   
+  00ad          LAD:    
+  00ad a601     [2]             LDA   #1
+  00af ac000000 [8]             CALL  UartUtil_Print
+  00b3 8d       [7]             RTC   
+ 1639:  
+ 1640:  /******************************************************************************
+ 1641:  * The App_HandleScanEdConfirm(nwkMessage_t *pMsg) function will handle the
+ 1642:  * ED scan confirm message received from the MLME when the ED scan has completed.
+ 1643:  * The message contains the ED scan result list. This function will search the
+ 1644:  * list in order to select the logical channel with the least energy. The
+ 1645:  * selected channel is stored in the global variable called 'mLogicalChannel'.
+ 1646:  *
+ 1647:  ******************************************************************************/
+ 1648:  static void App_HandleScanEdConfirm(nwkMessage_t *pMsg)
+ 1649:  {  
+  0000 89       [2]             PSHX  
+  0001 8b       [2]             PSHH  
+  0002 a7fb     [2]             AIS   #-5
+ 1650:    uint8_t n, minEnergy;
+ 1651:    uint8_t *pEdList;
+ 1652:    uint8_t ChannelMask;
+ 1653:    
+ 1654:    UartUtil_Print("Received the MLME-Scan Confirm message from the MAC\n\r", gAllowToBlock_d);
+  0004 450000   [3]             LDHX  @"Received the MLME-Scan Confirm message from the MAC\012\015"
+  0007 ac0000b0 [8]             CALL  App_HandleScanEdConfirm:176
+ 1655:      
+ 1656:    /* Get a pointer to the energy detect results */
+ 1657:    pEdList = pMsg->msgData.scanCnf.resList.pEnergyDetectList;
+  000b 9efe06   [5]             LDHX  6,SP
+  000e 9ece08   [5]             LDHX  8,X
+  0011 9eff03   [5]             STHX  3,SP
+ 1658:    
+ 1659:    /* Set the minimum energy to a large value */
+ 1660:    minEnergy = 0xFF;
+  0014 a6ff     [2]             LDA   #-1
+  0016 95       [2]             TSX   
+  0017 e704     [3]             STA   4,X
+ 1661:  
+ 1662:    /* Select default channel */
+ 1663:    mLogicalChannel = 11;
+  0019 a60b     [2]             LDA   #11
+  001b c70000   [4]             STA   mLogicalChannel
+ 1664:   
+ 1665:    /* Search for the channel with least energy */
+ 1666:    for(n=0; n<16; n++)
+  001e 6f01     [5]             CLR   1,X
+  0020          L20:    
+ 1667:    {
+ 1668:      ChannelMask = n + 11;
+  0020 95       [2]             TSX   
+  0021 e601     [3]             LDA   1,X
+  0023 ab0b     [2]             ADD   #11
+ 1669:  	if((pEdList[n] < minEnergy)&&((uint8_t)((mDefaultValueOfChannel_c>>ChannelMask) & 0x1)))
+  0025 f7       [2]             STA   ,X
+  0026 e601     [3]             LDA   1,X
+  0028 eb03     [3]             ADD   3,X
+  002a 87       [2]             PSHA  
+  002b 4f       [1]             CLRA  
+  002c e902     [3]             ADC   2,X
+  002e 87       [2]             PSHA  
+  002f e604     [3]             LDA   4,X
+  0031 8a       [3]             PULH  
+  0032 88       [3]             PULX  
+  0033 f1       [3]             CMP   ,X
+  0034 232e     [3]             BLS   L64 ;abs = 0064
+  0036 4f       [1]             CLRA  
+  0037 450200   [3]             LDHX  #512
+  003a 87       [2]             PSHA  
+  003b 87       [2]             PSHA  
+  003c 89       [2]             PSHX  
+  003d 8b       [2]             PSHH  
+  003e 95       [2]             TSX   
+  003f e604     [3]             LDA   4,X
+  0041 cd0000   [6]             JSR   _LLSR
+  0044 9ee604   [4]             LDA   4,SP
+  0047 a501     [2]             BIT   #1
+  0049 a708     [2]             AIS   #8
+  004b 2717     [3]             BEQ   L64 ;abs = 0064
+ 1670:      {
+ 1671:        minEnergy = pEdList[n];
+  004d e605     [3]             LDA   5,X
+  004f eb07     [3]             ADD   7,X
+  0051 87       [2]             PSHA  
+  0052 4f       [1]             CLRA  
+  0053 e906     [3]             ADC   6,X
+  0055 87       [2]             PSHA  
+  0056 8a       [3]             PULH  
+  0057 88       [3]             PULX  
+  0058 fe       [3]             LDX   ,X
+  0059 9eef05   [4]             STX   5,SP
+ 1672:        /* Channel numbering is 11 to 26 both inclusive */
+ 1673:        mLogicalChannel = n + 11; 
+  005c 95       [2]             TSX   
+  005d e601     [3]             LDA   1,X
+  005f ab0b     [2]             ADD   #11
+  0061 c70000   [4]             STA   mLogicalChannel
+  0064          L64:    
+  0064 95       [2]             TSX   
+  0065 6c01     [5]             INC   1,X
+  0067 e601     [3]             LDA   1,X
+  0069 a110     [2]             CMP   #16
+  006b 25b3     [3]             BCS   L20 ;abs = 0020
+ 1674:      }
+ 1675:    }
+ 1676:    
+ 1677:    /* Print out the result of the ED scan */
+ 1678:    UartUtil_Print("ED scan returned the following results:\n\r  [", gAllowToBlock_d);
+  006d 450000   [3]             LDHX  @"ED scan returned the following results:\012\015  ["
+  0070 ac0000b0 [8]             CALL  App_HandleScanEdConfirm:176
+ 1679:    UartUtil_PrintHex(pEdList, 16, gPrtHexBigEndian_c | gPrtHexSpaces_c);
+  0074 9efe03   [5]             LDHX  3,SP
+  0077 89       [2]             PSHX  
+  0078 8b       [2]             PSHH  
+  0079 ae10     [2]             LDX   #16
+  007b a609     [2]             LDA   #9
+  007d ac000000 [8]             CALL  UartUtil_PrintHex
+  0081 a702     [2]             AIS   #2
+ 1680:    UartUtil_Print("]\n\r\n\r", gAllowToBlock_d);
+  0083 450000   [3]             LDHX  @"]\012\015\012\015"
+  0086 ac0000b0 [8]             CALL  App_HandleScanEdConfirm:176
+ 1681:    
+ 1682:    /* Print out the selected logical channel */
+ 1683:    UartUtil_Print("Based on the ED scan the logical channel 0x", gAllowToBlock_d);
+  008a 450000   [3]             LDHX  @"Based on the ED scan the logical channel 0x"
+  008d ac0000b0 [8]             CALL  App_HandleScanEdConfirm:176
+ 1684:    UartUtil_PrintHex(&mLogicalChannel, 1, 0);
+  0091 450000   [3]             LDHX  @mLogicalChannel
+  0094 89       [2]             PSHX  
+  0095 8b       [2]             PSHH  
+  0096 ae01     [2]             LDX   #1
+  0098 4f       [1]             CLRA  
+  0099 ac000000 [8]             CALL  UartUtil_PrintHex
+  009d a702     [2]             AIS   #2
+ 1685:    UartUtil_Print(" was selected\n\r", gAllowToBlock_d);
+  009f 450000   [3]             LDHX  @" was selected\012\015"
+  00a2 ac0000b0 [8]             CALL  App_HandleScanEdConfirm:176
+ 1686:    
+ 1687:    /* The list of detected energies must be freed. */
+ 1688:    MSG_Free(pEdList);
+  00a6 9efe03   [5]             LDHX  3,SP
+  00a9 ac000000 [8]             CALL  MM_Free
+ 1689:  }
+  00ad a707     [2]             AIS   #7
+  00af 8d       [7]             RTC   
+  00b0          LB0:    
+  00b0 a601     [2]             LDA   #1
+  00b2 ac000000 [8]             CALL  UartUtil_Print
+  00b6 8d       [7]             RTC   
+ 1690:  
+ 1691:  /******************************************************************************/
+ 1692:  
+ 1693:  
+ 1694:  
