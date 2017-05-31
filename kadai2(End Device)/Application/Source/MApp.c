@@ -683,7 +683,7 @@ static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
   mlmeMessage_t *pMsg;
   mlmeAssociateRes_t *pAssocRes;
   
-  static uint8_t nwk_addr;
+  // static uint8_t nwk_addr; // deleted by yusk
  
   UartUtil_Print("Sending the MLME-Associate Response message to the MAC...", gAllowToBlock_d);
  
@@ -707,7 +707,7 @@ static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
       /* Assign a unique short address less than 0xfffe if the device requests so. */
       pAssocRes->assocShortAddress[0] = maMyAddress[0];
       pAssocRes->assocShortAddress[1] = 0x02;
-      nwk_addr += 1;
+      // nwk_addr += 1; // deleted by yusk
     }
     else
     {
@@ -764,7 +764,7 @@ static void Router_TransmitUartData(void)
 {   
   static uint8_t keysBuffer[mMaxKeysToReceive_c];
   static uint8_t keysReceived = 0;
-  const uint8_t broadcastaddress[8] = { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+  // const uint8_t broadcastaddress[8] = { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; //deleted by yusk
 
   
   /* get data from UART */
@@ -801,7 +801,7 @@ static void Router_TransmitUartData(void)
          flexible, and use the address mode required by the given situation. */
       
       
-      FLib_MemCpy(mpPacket->msgData.dataReq.dstAddr, (void *)broadcastaddress, 2);
+      // FLib_MemCpy(mpPacket->msgData.dataReq.dstAddr, (void *)broadcastaddress, 2); // deleted by yusk
       FLib_MemCpy(mpPacket->msgData.dataReq.srcAddr, (void *)maShortAddress, 2);
       FLib_MemCpy(mpPacket->msgData.dataReq.dstPanId, (void *)maPanId, 2);
       FLib_MemCpy(mpPacket->msgData.dataReq.srcPanId, (void *)maPanId, 2);
@@ -810,7 +810,7 @@ static void Router_TransmitUartData(void)
       mpPacket->msgData.dataReq.msduLength = keysReceived;
       /* Request MAC level acknowledgement, and 
          indirect transmission of the data packet */
-      mpPacket->msgData.dataReq.txOptions = 0;
+      mpPacket->msgData.dataReq.txOptions = gTxOptsAck_c | gTxOptsIndirect_c; // updated by yusk
       /* Give the data packet a handle. The handle is
          returned in the MCPS-Data Confirm message. */
       mpPacket->msgData.dataReq.msduHandle = mMsduHandle++;
