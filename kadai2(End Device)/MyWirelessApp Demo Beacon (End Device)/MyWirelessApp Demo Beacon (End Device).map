@@ -92,7 +92,7 @@ extern struct _tagStartup {
   unsigned nofZeroOut     2
   _Range   pZeroOut       0x80     1
                           0x300     2586
-  _Copy    *toCopyDownBeg 0x7F7D
+  _Copy    *toCopyDownBeg 0x7F71
 } _startupData;
 
 *********************************************************************************************
@@ -102,10 +102,10 @@ Section Name                    Size  Type     From       To       Segment
 MY_ZEROPAGE                        1   R/W       0x80       0x80   ZERO_PAGE_RAM
 .data                            106   R/W      0x300      0x369   APP_RAM
 NON_BANKED                      4960     R     0x4000     0x535F   APP_CODE_1
-.copy                            112     R     0x7F7D     0x7FEC   APP_CODE_1
+.copy                            112     R     0x7F71     0x7FE0   APP_CODE_1
 .rodata                          293     R     0x5360     0x5484   APP_CODE_1
 .rodata1                        2219     R     0x5485     0x5D2F   APP_CODE_1
-.text                           8541     R     0x5E20     0x7F7C   APP_CODE_1
+.text                           8529     R     0x5E20     0x7F70   APP_CODE_1
 .startData                        36     R     0x2080     0x20A3   APP_STARTUP_STRUC_FLASH
 FREESCALE_PROD_DATA               78     R     0xFF50     0xFF9D   FREESCALE_PROD_FLASH
 NV_REGISTERS_SECTION              16     R     0xFFB0     0xFFBF   RES_NV_REGISTERS_FLASH
@@ -124,7 +124,7 @@ PPAGE_2_3                        334     R    0x2B0F3    0x2B240   PPAGE_2
 RES_RESET_VECTOR_FLASH_vect          2     R     0xFFFE     0xFFFF   RES_RESET_VECTOR_FLASH
 
 Summary of section sizes per section type:
-READ_ONLY (R):        D282 (dec:    53890)
+READ_ONLY (R):        D276 (dec:    53878)
 READ_WRITE (R/W):      C1B (dec:     3099)
 
 *********************************************************************************************
@@ -425,19 +425,19 @@ MODULE:                 -- MApp_c.obj --
 - PROCEDURES:
      count_timer                               74E6       5       5       2   .text       
      MApp_init                                 74EB      95     149       2   .text       
-     AppTask                                   7580     358     856      90   .text       
-     UartRxCallBack                            78D8      1B      27       2   .text       
-     App_HandleMlmeInput                       78F3      16      22       2   .text       
-     Router_HandleMlmeInput                    7909      44      68       2   .text       
-     Router_SendAssociateResponse              794D      B4     180      11   .text       
-     Router_TransmitUartData                   7A01      E7     231       6   .text       
-     App_StartScan                             7AE8      5D      93      12   .text       
-     App_HandleScanActiveConfirm               7B45     156     342       5   .text       
-     App_SendAssociateRequest                  7C9B      7E     126      10   .text       
-     App_HandleAssociateConfirm                7D19      6F     111       2   .text       
-     App_HandleMcpsInput                       7D88      2B      43       2   .text       
-     App_WaitMsg                               7DB3      10      16      10   .text       
-     App_TransmitSensorData                    7DC3     1BA     442      34   .text       
+     AppTask                                   7580     34C     844      86   .text       
+     UartRxCallBack                            78CC      1B      27       2   .text       
+     App_HandleMlmeInput                       78E7      16      22       2   .text       
+     Router_HandleMlmeInput                    78FD      44      68       2   .text       
+     Router_SendAssociateResponse              7941      B4     180      11   .text       
+     Router_TransmitUartData                   79F5      E7     231       6   .text       
+     App_StartScan                             7ADC      5D      93      12   .text       
+     App_HandleScanActiveConfirm               7B39     156     342       5   .text       
+     App_SendAssociateRequest                  7C8F      7E     126      10   .text       
+     App_HandleAssociateConfirm                7D0D      6F     111       2   .text       
+     App_HandleMcpsInput                       7D7C      2B      43       2   .text       
+     App_WaitMsg                               7DA7      10      16      10   .text       
+     App_TransmitSensorData                    7DB7     1BA     442      34   .text       
      GenandTransData                           C000      AB     171       6   APP_CODE_2_0
      App_HandleGenericKey                      C0AB      30      48       2   APP_CODE_2_0
      App_HandleKeys                            C0DB       5       5       2   APP_CODE_2_0
@@ -1271,7 +1271,7 @@ MODULE STATISTIC
   PhyPlmeData_c.obj                           64    362      0
   PhyTime_c.obj                                0     54      0
   UartUtil_c.obj                               0    379      0
-  MApp_c.obj                                  99   3366   2223
+  MApp_c.obj                                  99   3354   2223
   MApp_init_c.obj                              1    133      0
   MacInit_c.obj                                1    113      9
   GlobalVars_c.obj                          1112      4     10
@@ -2147,19 +2147,19 @@ OBJECT LIST SORTED BY ADDRESS
      UartUtil_TxCallback                       74E1       5       5       6   .text       
      count_timer                               74E6       5       5       2   .text       
      MApp_init                                 74EB      95     149       2   .text       
-     AppTask                                   7580     358     856      90   .text       
-     UartRxCallBack                            78D8      1B      27       2   .text       
-     App_HandleMlmeInput                       78F3      16      22       2   .text       
-     Router_HandleMlmeInput                    7909      44      68       2   .text       
-     Router_SendAssociateResponse              794D      B4     180      11   .text       
-     Router_TransmitUartData                   7A01      E7     231       6   .text       
-     App_StartScan                             7AE8      5D      93      12   .text       
-     App_HandleScanActiveConfirm               7B45     156     342       5   .text       
-     App_SendAssociateRequest                  7C9B      7E     126      10   .text       
-     App_HandleAssociateConfirm                7D19      6F     111       2   .text       
-     App_HandleMcpsInput                       7D88      2B      43       2   .text       
-     App_WaitMsg                               7DB3      10      16      10   .text       
-     App_TransmitSensorData                    7DC3     1BA     442      34   .text       
+     AppTask                                   7580     34C     844      86   .text       
+     UartRxCallBack                            78CC      1B      27       2   .text       
+     App_HandleMlmeInput                       78E7      16      22       2   .text       
+     Router_HandleMlmeInput                    78FD      44      68       2   .text       
+     Router_SendAssociateResponse              7941      B4     180      11   .text       
+     Router_TransmitUartData                   79F5      E7     231       6   .text       
+     App_StartScan                             7ADC      5D      93      12   .text       
+     App_HandleScanActiveConfirm               7B39     156     342       5   .text       
+     App_SendAssociateRequest                  7C8F      7E     126      10   .text       
+     App_HandleAssociateConfirm                7D0D      6F     111       2   .text       
+     App_HandleMcpsInput                       7D7C      2B      43       2   .text       
+     App_WaitMsg                               7DA7      10      16      10   .text       
+     App_TransmitSensorData                    7DB7     1BA     442      34   .text       
      MlmeOh_CreateCommandFrameMessage          8000      58      88      16   PPAGE_0_1   
      MlmeOh_CreateCommandFrame                 8058     2E0     736      11   PPAGE_0_1   
      MlmeSm_Init                               8338      11      17       2   PPAGE_0_1   
@@ -2685,106 +2685,106 @@ Telec_c.obj (802.15.4_MAC_FFD_S08MC1323x.Lib):
 *********************************************************************************************
 COPYDOWN SECTION
 ---------------------------------------------------------------------------------------------
-------- ROM-ADDRESS: 0x7F7D ---- SIZE       4 ---
+------- ROM-ADDRESS: 0x7F71 ---- SIZE       4 ---
 Filling bytes inserted
  006A0300
-------- ROM-ADDRESS: 0x7F81 ---- RAM-ADDRESS: 0x300 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F75 ---- RAM-ADDRESS: 0x300 ---- SIZE       1 ---
 Name of initialized Object : mMMA8652TimerID
  FF
-------- ROM-ADDRESS: 0x7F82 ---- RAM-ADDRESS: 0x301 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F76 ---- RAM-ADDRESS: 0x301 ---- SIZE       1 ---
 Name of initialized Object : mLEDTimerID
  FF
-------- ROM-ADDRESS: 0x7F83 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F77 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7F84 ---- RAM-ADDRESS: 0x303 ---- SIZE       9 ---
+------- ROM-ADDRESS: 0x7F78 ---- RAM-ADDRESS: 0x303 ---- SIZE       9 ---
 Name of initialized Object : mKeyRowPorts:1
  0400050100 04000502
-------- ROM-ADDRESS: 0x7F8D ---- RAM-ADDRESS: 0x30C ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F81 ---- RAM-ADDRESS: 0x30C ---- SIZE       1 ---
 Name of initialized Object : mKeyScanTimerID
  FF
-------- ROM-ADDRESS: 0x7F8E ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F82 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7F8F ---- RAM-ADDRESS: 0x30E ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7F83 ---- RAM-ADDRESS: 0x30E ---- SIZE       2 ---
 Name of initialized Object : pTimer1Isr:1
  42C1
-------- ROM-ADDRESS: 0x7F91 ---- RAM-ADDRESS: 0x310 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F85 ---- RAM-ADDRESS: 0x310 ---- SIZE       1 ---
 Name of initialized Object : gPhyCurrentChannel
  0B
-------- ROM-ADDRESS: 0x7F92 ---- RAM-ADDRESS: 0x311 ---- SIZE      15 ---
+------- ROM-ADDRESS: 0x7F86 ---- RAM-ADDRESS: 0x311 ---- SIZE      15 ---
 Name of initialized Object : pwrOutIAR10
  2626262626 2626262626 2626262626
-------- ROM-ADDRESS: 0x7FA1 ---- RAM-ADDRESS: 0x320 ---- SIZE      15 ---
+------- ROM-ADDRESS: 0x7F95 ---- RAM-ADDRESS: 0x320 ---- SIZE      15 ---
 Name of initialized Object : pwrOutIAR11
  4949494A4A 4A4E4D4D4D 4D4D4C4D4D
-------- ROM-ADDRESS: 0x7FB0 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FA4 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FB1 ---- RAM-ADDRESS: 0x330 ---- SIZE      14 ---
+------- ROM-ADDRESS: 0x7FA5 ---- RAM-ADDRESS: 0x330 ---- SIZE      14 ---
 Name of initialized Object : pwrOutIAR20:1
  0101000100 0001000100 01010101
-------- ROM-ADDRESS: 0x7FBF ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7FB3 ---- SIZE       2 ---
 Filling bytes inserted
  0000
-------- ROM-ADDRESS: 0x7FC1 ---- RAM-ADDRESS: 0x340 ---- SIZE      13 ---
+------- ROM-ADDRESS: 0x7FB5 ---- RAM-ADDRESS: 0x340 ---- SIZE      13 ---
 Name of initialized Object : pwrOutCtrl:2
  0100000100 0040404141 424344
-------- ROM-ADDRESS: 0x7FCE ---- RAM-ADDRESS: 0x34D ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FC2 ---- RAM-ADDRESS: 0x34D ---- SIZE       1 ---
 Name of initialized Object : mTimerID
  FF
-------- ROM-ADDRESS: 0x7FCF ---- RAM-ADDRESS: 0x34E ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7FC3 ---- RAM-ADDRESS: 0x34E ---- SIZE       2 ---
 Name of initialized Object : pLastPool
  09D3
-------- ROM-ADDRESS: 0x7FD1 ---- RAM-ADDRESS: 0x350 ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7FC5 ---- RAM-ADDRESS: 0x350 ---- SIZE       2 ---
 Name of initialized Object : pSecondLastPool
  09CD
-------- ROM-ADDRESS: 0x7FD3 ---- RAM-ADDRESS: 0x352 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FC7 ---- RAM-ADDRESS: 0x352 ---- SIZE       1 ---
 Name of initialized Object : aMaxFrameRetries
  03
-------- ROM-ADDRESS: 0x7FD4 ---- RAM-ADDRESS: 0x353 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FC8 ---- RAM-ADDRESS: 0x353 ---- SIZE       1 ---
 Name of initialized Object : mCMBackoff
  0A
-------- ROM-ADDRESS: 0x7FD5 ---- RAM-ADDRESS: 0x354 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FC9 ---- RAM-ADDRESS: 0x354 ---- SIZE       1 ---
 Name of initialized Object : gMacTimerID
  FF
-------- ROM-ADDRESS: 0x7FD6 ---- RAM-ADDRESS: 0x355 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FCA ---- RAM-ADDRESS: 0x355 ---- SIZE       1 ---
 Name of initialized Object : gSequencerTimerID
  FF
-------- ROM-ADDRESS: 0x7FD7 ---- RAM-ADDRESS: 0x356 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FCB ---- RAM-ADDRESS: 0x356 ---- SIZE       1 ---
 Name of initialized Object : gMacRxTxPacketTimerID
  FF
-------- ROM-ADDRESS: 0x7FD8 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FCC ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FD9 ---- RAM-ADDRESS: 0x358 ---- SIZE       3 ---
+------- ROM-ADDRESS: 0x7FCD ---- RAM-ADDRESS: 0x358 ---- SIZE       3 ---
 Name of initialized Object : gMlmeSm:1
  C69001
-------- ROM-ADDRESS: 0x7FDC ---- RAM-ADDRESS: 0x35B ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FD0 ---- RAM-ADDRESS: 0x35B ---- SIZE       1 ---
 Name of initialized Object : gmBackoffPeriod
  0A
-------- ROM-ADDRESS: 0x7FDD ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FD1 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FDE ---- RAM-ADDRESS: 0x35D ---- SIZE       3 ---
+------- ROM-ADDRESS: 0x7FD2 ---- RAM-ADDRESS: 0x35D ---- SIZE       3 ---
 Name of initialized Object : gMemCtrlSm:1
  C69001
-------- ROM-ADDRESS: 0x7FE1 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FD5 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FE2 ---- RAM-ADDRESS: 0x361 ---- SIZE       3 ---
+------- ROM-ADDRESS: 0x7FD6 ---- RAM-ADDRESS: 0x361 ---- SIZE       3 ---
 Name of initialized Object : gMemLwrSm:1
  C69001
-------- ROM-ADDRESS: 0x7FE5 ---- RAM-ADDRESS: 0x364 ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7FD9 ---- RAM-ADDRESS: 0x364 ---- SIZE       2 ---
 Name of initialized Object : mActionStartClock
  FFFF
-------- ROM-ADDRESS: 0x7FE7 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FDB ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FE8 ---- RAM-ADDRESS: 0x367 ---- SIZE       3 ---
+------- ROM-ADDRESS: 0x7FDC ---- RAM-ADDRESS: 0x367 ---- SIZE       3 ---
 Name of initialized Object : mActionCompleteClock:1
  FFFFFF
-------- ROM-ADDRESS: 0x7FEB ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7FDF ---- SIZE       2 ---
 Filling bytes inserted
  0000
 
@@ -7300,5 +7300,5 @@ STATISTIC SECTION
 ExeFile:
 --------
 Number of blocks to be downloaded: 15
-Total size of all blocks to be downloaded: 53890
+Total size of all blocks to be downloaded: 53878
 

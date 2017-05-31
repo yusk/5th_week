@@ -1,4 +1,5 @@
 
+
 SSM/ZTC/Source/ZtcMain_c.obj: \
 	../SSM/ZTC/Source/ZtcMain.c \
 	C:/Users/kawasaki/codewarrior_workspace/5th\ week/kadai2(End\ Device)/PLM/Interface/EmbeddedTypes.h \
