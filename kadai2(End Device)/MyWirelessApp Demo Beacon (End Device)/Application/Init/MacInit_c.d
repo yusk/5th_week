@@ -1,4 +1,5 @@
 
+
 Application/Init/MacInit_c.obj: \
 	../Application/Init/MacInit.c \
 	C:/Users/kawasaki/codewarrior_workspace/5th\ week/kadai2(End\ Device)/PLM/Interface/EmbeddedTypes.h \

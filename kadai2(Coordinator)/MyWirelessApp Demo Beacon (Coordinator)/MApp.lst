@@ -1170,12 +1170,12 @@ ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
   0026 2a15     [3]             BPL   L3D ;abs = 003d
   668:      {
   669:        /* Assign a unique short address less than 0xfffe if the device requests so. */
-  670:        pAssocRes->assocShortAddress[0] = nwk_addr;
-  0028 c60000   [4]             LDA   nwk_addr
-  002b 9efe01   [5]             LDHX  1,SP
-  002e e708     [3]             STA   8,X
-  671:        pAssocRes->assocShortAddress[1] = 0x01;
-  0030 a601     [2]             LDA   #1
+  670:        pAssocRes->assocShortAddress[0] = 0x01;
+  0028 a601     [2]             LDA   #1
+  002a 9efe01   [5]             LDHX  1,SP
+  002d e708     [3]             STA   8,X
+  671:        pAssocRes->assocShortAddress[1] = nwk_addr;
+  002f c60000   [4]             LDA   nwk_addr
   0032 e709     [3]             STA   9,X
   672:        nwk_addr += 1;
   0034 450000   [3]             LDHX  @nwk_addr

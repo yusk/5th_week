@@ -399,13 +399,13 @@ void AppTask(event_t events)
               LCD_WriteString(2,"and receive data");      
               
 //********************************************************
-              if (maMyAddress[1]==0x01){
+              if (maMyAddress[0]==0x01){
             	  UartUtil_Print("\n\rSwitch Role to Rooter\n\r", gAllowToBlock_d);
-            	  gState = stateListen;
+            	  gState = stateInitRooter;
             	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
-              }else if(maMyAddress[1]==0x02){
+              }else if(maMyAddress[0]==0x02){
             	  UartUtil_Print("\n\rSwitch Role to End-Device\n\r", gAllowToBlock_d);
-            	  gState = stateStartRooter;
+            	  gState = stateListen;
             	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
               }
 //********************************************************
@@ -414,7 +414,7 @@ void AppTask(event_t events)
           {
           
         	  UartUtil_Print("\n\rAssociate Confirm wasn't successful... \n\r\n\r", gAllowToBlock_d);
-        	  gState = stateInitRooter;
+        	  gState = stateAssociate;
         	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
           }
         }
@@ -705,8 +705,8 @@ static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
     if(pMsgIn->msgData.associateInd.capabilityInfo & gCapInfoAllocAddr_c)
     {
       /* Assign a unique short address less than 0xfffe if the device requests so. */
-      pAssocRes->assocShortAddress[0] = maMyAddress[0];
-      pAssocRes->assocShortAddress[1] = 0x02;
+      pAssocRes->assocShortAddress[1] = maMyAddress[1];
+      pAssocRes->assocShortAddress[0] = 0x02;
       nwk_addr += 1;
     }
     else
@@ -1160,7 +1160,6 @@ static uint8_t App_HandleAssociateConfirm(nwkMessage_t *pMsg)
   {
   return pMsg->msgData.associateCnf.status; 
   }
-  
 }
 
 

@@ -667,8 +667,8 @@ static uint8_t App_SendAssociateResponse(nwkMessage_t *pMsgIn)
     if(pMsgIn->msgData.associateInd.capabilityInfo & gCapInfoAllocAddr_c)
     {
       /* Assign a unique short address less than 0xfffe if the device requests so. */
-      pAssocRes->assocShortAddress[0] = nwk_addr;
-      pAssocRes->assocShortAddress[1] = 0x01;
+      pAssocRes->assocShortAddress[0] = 0x01;
+      pAssocRes->assocShortAddress[1] = nwk_addr;
       nwk_addr += 1;
     }
     else
