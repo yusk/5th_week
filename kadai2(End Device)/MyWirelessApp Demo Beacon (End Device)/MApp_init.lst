@@ -246,7 +246,7 @@ ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
   000e a6f7     [2]             LDA   #-9
   0010 e705     [3]             STA   5,X
   0012 6f06     [5]             CLR   6,X
-  0014 a642     [2]             LDA   #66
+  0014 a644     [2]             LDA   #68
   0016 e707     [3]             STA   7,X
   209:    /*Check if Extended address is already generated(if the Extended Address 
   210:    is All "0xFF", it means that no extended address is genereted);If not set
