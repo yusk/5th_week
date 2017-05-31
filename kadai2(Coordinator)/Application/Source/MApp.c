@@ -670,6 +670,9 @@ static uint8_t App_SendAssociateResponse(nwkMessage_t *pMsgIn)
       pAssocRes->assocShortAddress[0] = 0x01;
       pAssocRes->assocShortAddress[1] = nwk_addr;
       nwk_addr += 1;
+      if (nwk_addr >= 2){
+    	  return errorAllocFailed;
+      }
     }
     else
     {

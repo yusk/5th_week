@@ -115,7 +115,7 @@ MyWirelessApp\ Demo\ Beacon\ (End\ Device).abs.s19: $(BBL_SRCS) $(EXECUTABLES) |
 
 # Other Targets
 clean:
-	-$(RM) "./*/*/*.obj" "./*/*/*/*.obj" "./*/*/*/*/*.obj"  $(CPP_DEPS_QUOTED) $(CC_DEPS_QUOTED) $(CXX_DEPS_QUOTED) $(BURNER_OUTPUT_OUTPUTS_QUOTED) $(C_UPPER_DEPS_QUOTED) $(C++_DEPS_QUOTED) $(EXECUTABLES_QUOTED) "./*/*/*.d" "./*/*/*/*.d" "./*/*/*/*/*.d"  $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs.args $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).args $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).map $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).s19
+	-$(RM) "./*/*/*.obj" "./*/*/*/*.obj" "./*/*/*/*/*.obj"  $(CPP_DEPS_QUOTED) $(CC_DEPS_QUOTED) $(CXX_DEPS_QUOTED) $(BURNER_OUTPUT_OUTPUTS_QUOTED) $(C_UPPER_DEPS_QUOTED) $(C++_DEPS_QUOTED) $(EXECUTABLES_QUOTED) "./*/*/*.d" "./*/*/*/*.d" "./*/*/*/*/*.d"  $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs.args $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).args $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).map $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).s19
 	-@echo ' '
 
 pre-build:

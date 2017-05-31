@@ -682,6 +682,8 @@ static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
 {
   mlmeMessage_t *pMsg;
   mlmeAssociateRes_t *pAssocRes;
+
+  static uint8_t count;
   
   // static uint8_t nwk_addr; // deleted by yusk
  
@@ -704,10 +706,14 @@ static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
        be assigned to it. */
     if(pMsgIn->msgData.associateInd.capabilityInfo & gCapInfoAllocAddr_c)
     {
+      if(count != 0){
+    	  return errorAllocFailed;
+      }
       /* Assign a unique short address less than 0xfffe if the device requests so. */
       pAssocRes->assocShortAddress[1] = maMyAddress[1];
       pAssocRes->assocShortAddress[0] = 0x02;
       // nwk_addr += 1; // deleted by yusk
+      count += 1;
     }
     else
     {
