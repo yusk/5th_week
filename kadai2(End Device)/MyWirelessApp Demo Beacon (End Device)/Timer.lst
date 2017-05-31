@@ -1,0 +1,1487 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /*****************************************************************************
+    2:  * Timer implementation.
+    3:  *
+    4:  * Copyright (c) 2008, Freescale, Inc. All rights reserved.
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from Freescale Semiconductor.
+   10:  *
+   11:  *****************************************************************************/
+   12:  
+   13:  #include "EmbeddedTypes.h"
+   14:  #include "IrqControlLib.h"
+   15:  #include "TS_Interface.h"
+   16:  #include "TMR_Interface.h"
+   17:  #include "Timer.h"
+   18:  #include "FunctionLib.h"
+   19:  
+   20:  /*****************************************************************************
+   21:  ******************************************************************************
+   22:  * Private macros
+   23:  ******************************************************************************
+   24:  *****************************************************************************/
+   25:  
+   26:  
+   27:  /* Number of elements in an array. */
+   28:  #define NumberOfElements(array)   ((sizeof(array) / (sizeof(array[0]))))
+   29:  
+   30:  /* Timer status. If none of these flags are on, the timer is not allocated.
+   31:  * For allocated timers, exactly one of these flags will be set.
+   32:  * mTmrStatusActive_c   Timer has been started and has not yet expired.
+   33:  * mTmrStatusReady_c    TMR_StartTimer() has been called for this timer, but
+   34:  *                      the timer task has not yet actually started it. The
+   35:  *                      timer is considered to be active.
+   36:  * mTmrStatusInactive_c Timer is allocated, but is not active.
+   37:  */
+   38:  typedef uint8_t tmrStatus_t;
+   39:  #define mTmrStatusFree_c        0
+   40:  #define mTmrStatusActive_c      0x20
+   41:  #define mTmrStatusReady_c       0x40
+   42:  #define mTmrStatusInactive_c    0x80
+   43:  
+   44:  #define mTimerStatusMask_c      ( mTmrStatusActive_c \
+   45:                                  | mTmrStatusReady_c \
+   46:                                  | mTmrStatusInactive_c)
+   47:  
+   48:  /* If all bits in the status byte are zero, the timer is free. */
+   49:  #define TMR_IsTimerAllocated(timerID)   (maTmrTimerStatusTable[(timerID)])
+   50:  #define TMR_MarkTimerFree(timerID)       (maTmrTimerStatusTable[(timerID)] = mTmrStatusFree_c)
+   51:  
+   52:  #define mTimerType_c            ( gTmrSingleShotTimer_c \
+   53:                                   | gTmrSetSecondTimer_c \
+   54:                                   | gTmrSetMinuteTimer_c \
+   55:                                   | gTmrIntervalTimer_c \
+   56:                                   | gTmrLowPowerTimer_c )
+   57:                                
+   58:  
+   59:  /* TMR_Task() event flag. Only one event is needed. */
+   60:  #define mTMR_Event_c    ( 1 << 0 )
+   61:  
+   62:  /* One minute in milliseconds */
+   63:  #define mOneMinute_c 60000
+   64:  /* One second in milliseconds */
+   65:  #define mOneSecond_c 1000
+   66:  
+   67:  /* Count to maximum (0xffff - 2*4ms(in ticks)), to be sure that the currentTimeInTicks 
+   68:  will never roll over previousTimeInTicks in the TMR_Task(); 
+   69:  A task have to be executed at most in 4 ms  */
+   70:  #define mMaxToCountDown_c (0x7FFF - TmrTicksFromMilliseconds(8))
+   71:  
+   72:  /* 4ms in ticks (for different source clocks).
+   73:     It's assumed that a task is executed in 4 ms; */
+   74:  /* Compensate for the real TMR clock (4.096ms) */
+   75:  #define m4msTicks_c   ((TmrTicksFromMilliseconds(5) == 0) ? 1 : TmrTicksFromMilliseconds(5))
+   76:  
+   77:  /* Detect the timer type */                                          
+   78:  #define IsMinuteTimer(type)  (((type) & gTmrMinuteTimer_c) == gTmrMinuteTimer_c)
+   79:  #define IsSecondTimer(type)  (((type) & gTmrSecondTimer_c) == gTmrSecondTimer_c)                                         
+   80:  #define IsLowPowerTimer(type)  ((type) & gTmrLowPowerTimer_c)
+   81:  #define IsLowPowerMinuteTimer(type)  (((type) & gTmrLowPowerMinuteTimer_c) == gTmrLowPowerMinuteTimer_c)
+   82:  #define IsLowPowerSecondTimer(type)  (((type) & gTmrLowPowerSecondTimer_c) == gTmrLowPowerSecondTimer_c)
+   83:  #define IsLowPowerSingleShotMillisTimer(type)  (((type) & gTmrLowPowerSingleShotMillisTimer_c) \
+   84:                                                    == gTmrLowPowerSingleShotMillisTimer_c)
+   85:  #define IsLowPowerIntervalMillisTimer(type)  (((type) & gTmrLowPowerIntervalMillisTimer_c) \
+   86:                                                    == gTmrLowPowerIntervalMillisTimer_c)
+   87:  
+   88:  /* Transform ticks to milliseconds
+   89:     Is assumed that 1 tick has at least 1ms...
+   90:  */
+   91:  #define TmrMillisecondsFromTicks(ticks) ((uint32_t)((uint16_t)mOneSecond_c/TmrTicksForOneSecond()) * (uint32_t)(ticks))
+   92:  
+   93:   
+   94:  /*****************************************************************************
+   95:  ******************************************************************************
+   96:  * Private type definitions
+   97:  ******************************************************************************
+   98:  *****************************************************************************/
+   99:  
+  100:  /* Used to read 16 bit hardware registers. */
+  101:  typedef union read16bitReg_tag {
+  102:    uint16_t wordAccess;
+  103:    uint8_t  byteAccess[2];
+  104:  } read16bitReg_t;
+  105:  
+  106:  /* One entry in the main timer table.
+  107:  * intervalInTicks      The timer's original duration, in ticks. Used to reset
+  108:  *                      intervnal timers.
+  109:  * countDown            When a timer is started, this is set to the duration.
+  110:  *                      The timer task decrements this value. When it reaches
+  111:  *                      zero, the timer has expired.
+  112:  */
+  113:  typedef struct tmrTimerTableEntry_tag {
+  114:    tmrTimerTicks_t intervalInTicks;
+  115:    tmrTimerTicks_t countDown;
+  116:    pfTmrCallBack_t pfCallBack;
+  117:  } tmrTimerTableEntry_t;
+  118:  
+  119:  /* The status and type are bitfields, to save RAM. This costs some code */
+  120:  /* space, though. */
+  121:  typedef uint8_t tmrTimerStatus_t;
+  122:  
+  123:  /*****************************************************************************
+  124:  ******************************************************************************
+  125:  * Private prototypes
+  126:  ******************************************************************************
+  127:  *****************************************************************************/
+  128:  
+  129:  static tmrStatus_t TMR_GetTimerStatus(tmrTimerID_t timerID);
+  130:  static void TMR_SetTimerStatus(tmrTimerID_t timerID, tmrStatus_t status);
+  131:  static tmrTimerType_t TMR_GetTimerType(tmrTimerID_t timerID);
+  132:  static void TMR_SetTimerType(tmrTimerID_t timerID, tmrTimerType_t type);
+  133:  
+  134:  /*****************************************************************************
+  135:  ******************************************************************************
+  136:  * Private memory declarations
+  137:  ******************************************************************************
+  138:  *****************************************************************************/
+  139:  
+  140:  /* Main timer table. All allocated timers are stored here. A timer's ID */
+  141:  /* is it's index in this table. */
+  142:  static tmrTimerTableEntry_t maTmrTimerTable[gTmrTotalTimers_c];
+  143:  
+  144:  /* Making the single-byte-per-timer status table a separate array saves */
+  145:  /* a bit of code space. If an entry is == 0, the timer is not allocated. */
+  146:  static tmrStatus_t maTmrTimerStatusTable[gTmrTotalTimers_c];
+  147:  
+  148:  /* Number of Active timers (without low power capability)
+  149:     the MCU can not enter low power if numberOfActiveTimers!=0 */
+  150:  static uint8_t numberOfActiveTimers = 0;
+  151:  /* Number of low power active timer 
+  152:     The MCU can enter in low power if more low power timers are active */
+  153:  static uint8_t numberOfLowPowerActiveTimers = 0;
+  154:  
+  155:  #define IncrementActiveTimerNumber(type)  ((type & gTmrLowPowerTimer_c) \
+  156:                                            ?(++numberOfLowPowerActiveTimers) \
+  157:                                            :(++numberOfActiveTimers) )                                   
+  158:  #define DecrementActiveTimerNumber(type)  ((type & gTmrLowPowerTimer_c) \
+  159:                                            ?(--numberOfLowPowerActiveTimers) \
+  160:                                            :(--numberOfActiveTimers) ) 
+  161:  
+  162:  /* Used to access 16 bit hardware registers. */
+  163:  static read16bitReg_t mTmrRead16bitReg;
+  164:  
+  165:  /* No other code should ever post an event to the timer task. */
+  166:  static tsTaskID_t gTimerTaskID;
+  167:  
+  168:  /* The previous time in ticks when the counter register was read */
+  169:  static uint16_t previousTimeInTicks = 0;
+  170:  /* Flag if the hardware timer is running or not*/
+  171:  static bool_t timerHardwareIsRunning = FALSE;
+  172:  
+  173:  /*****************************************************************************
+  174:  ******************************************************************************
+  175:  * Public functions
+  176:  ******************************************************************************
+  177:  *****************************************************************************/
+  178:  
+  179:  /* Initialize the timer module. */
+  180:  void TMR_Init
+  181:  (
+  182:  void
+  183:  )
+  184:  {
+  185:    /* Configure a TPM channel: enable interrupts; set output compare mode. */
+  186:    gTPMxCnSC_c = (gTPMxCnSC_IE_c | gTPMxCnSC_MSA_c);
+  0000 6e500d   [4]             MOV   #80,13
+  187:    
+  188:    gTimerTaskID = TS_CreateTask(gTsTimerTaskPriority_c, TMR_Task);
+  0003 a6fe     [2]             LDA   #-2
+  0005 87       [2]             PSHA  
+  0006 450000   [3]             LDHX  @TMR_Task
+  0009 89       [2]             PSHX  
+  000a 8b       [2]             PSHH  
+  000b a600     [2]             LDA   @TMR_Task:PAGE
+  000d 87       [2]             PSHA  
+  000e ac000000 [8]             CALL  TS_CreateTask
+  0012 a704     [2]             AIS   #4
+  0014 c70000   [4]             STA   gTimerTaskID
+  189:  }                                       /* TMR_Init() */
+  0017 8d       [7]             RTC   
+  190:  
+  191:  /****************************************************************************/
+  192:  
+  193:  /* Allocate a timer.
+  194:  * Returns the timer id, or gTmrInvalidTimerID_c if the timer table is full.
+  195:  */
+  196:  tmrTimerID_t TMR_AllocateTimer
+  197:  (
+  198:  void
+  199:  )
+  200:  {
+  201:    index_t i;
+  202:    
+  203:    for (i = 0; i < NumberOfElements(maTmrTimerTable); ++i) {
+  0000 5f       [1]             CLRX  
+  0001          L1:     
+  204:      if (!TMR_IsTimerAllocated(i)) {
+  0001 8c       [1]             CLRH  
+  0002 d60000   [4]             LDA   @maTmrTimerStatusTable,X
+  0005 2609     [3]             BNE   L10 ;abs = 0010
+  205:        TMR_SetTimerStatus(i, mTmrStatusInactive_c);
+  0007 89       [2]             PSHX  
+  0008 a680     [2]             LDA   #-128
+  000a ac000000 [8]             CALL  TMR_SetTimerStatus
+  206:        return i;
+  000e 86       [3]             PULA  
+  000f 8d       [7]             RTC   
+  0010          L10:    
+  0010 5c       [1]             INCX  
+  0011 a322     [2]             CPX   #34
+  0013 25ec     [3]             BCS   L1 ;abs = 0001
+  207:      }
+  208:    }
+  209:    
+  210:    /* Out of timers. Assert. */
+  211:  #if gTMR_Debug_d
+  212:    BeeAppAssert(gAssertCode_NoTimers_c);
+  0015 a602     [2]             LDA   #2
+  0017 ac000000 [8]             CALL  BeeAppAssert
+  213:  #endif
+  214:    return gTmrInvalidTimerID_c;
+  001b a6ff     [2]             LDA   #-1
+  215:  }                                       /* TMR_AllocateTimer() */
+  001d 8d       [7]             RTC   
+  216:  
+  217:  
+  218:  /*****************************************************************************/
+  219:  
+  220:  /* Return true if there are no active timers (without low power capability); 
+  221:     return FALSE otherwise. */
+  222:  bool_t TMR_AreAllTimersOff
+  223:  (
+  224:  void
+  225:  )
+  226:  {
+  227:    return !numberOfActiveTimers;
+  0000 c60000   [4]             LDA   numberOfActiveTimers
+  0003 2702     [3]             BEQ   L7 ;abs = 0007
+  0005 4f       [1]             CLRA  
+  0006 8d       [7]             RTC   
+  0007          L7:     
+  0007 a601     [2]             LDA   #1
+  228:  }                                       /* TMR_AreAllTimersOff() */
+  0009 8d       [7]             RTC   
+  229:  
+  230:  /****************************************************************************/
+  231:  
+  232:  /* Free any timer. Harmless if the timer is already free. */
+  233:  void TMR_FreeTimer
+  234:  (
+  235:  tmrTimerID_t timerID
+  236:  )
+  237:  {
+  238:    TMR_StopTimer(timerID);
+  0000 87       [2]             PSHA  
+  0001 ac000000 [8]             CALL  TMR_StopTimer
+  239:    TMR_MarkTimerFree(timerID);
+  0005 8c       [1]             CLRH  
+  0006 88       [3]             PULX  
+  0007 4f       [1]             CLRA  
+  0008 d70000   [4]             STA   @maTmrTimerStatusTable,X
+  240:  }                                       /* TMR_FreeTimer() */
+  000b 8d       [7]             RTC   
+  241:  
+  242:  /****************************************************************************/
+  243:  /* Place it in NON_BANKED memory */
+  244:  #ifdef MEMORY_MODEL_BANKED
+  245:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+  246:  #else
+  247:  #pragma CODE_SEG DEFAULT
+  248:  #endif /* MEMORY_MODEL_BANKED */
+  249:  /* Timer ISR. */
+  250:  INTERRUPT_KEYWORD void TMR_InterruptHandler(void) {
+  0000 8b       [2]             PSHH  
+  251:    __asm {                               /* The HCS08 does not save H on interrupt. */
+  252:      PSHH
+  0001 8b       [2]             PSHH  
+  253:    }
+  254:      
+  255:    /* Clearing the overflow flag requires reading it and then writing it. */
+  256:    if ( gTPMxCnSC_c & gTPMxCnSC_F_c ) {
+  0002 0f0d0c   [5]             BRCLR 7,13,L11 ;abs = 0011
+  257:      gTPMxCnSC_c &= ~gTPMxCnSC_F_c;
+  0005 1f0d     [5]             BCLR  7,13
+  258:      TS_SendEvent(gTimerTaskID, mTMR_Event_c);
+  0007 c60000   [4]             LDA   gTimerTaskID
+  000a ae01     [2]             LDX   #1
+  000c 8c       [1]             CLRH  
+  000d ac000000 [8]             CALL  TS_SendEvent
+  0011          L11:    
+  259:    }
+  260:    
+  261:    __asm {
+  262:      PULH
+  0011 8a       [3]             PULH  
+  263:    }
+  264:  }                                       /* TMR_InterruptHandler() */
+  0012 8a       [3]             PULH  
+  0013 80       [9]             RTI   
+  265:  #pragma CODE_SEG DEFAULT
+  266:  /*****************************************************************************/
+  267:  
+  268:  
+  269:  /* Return TRUE if the timer is active. */
+  270:  bool_t TMR_IsTimerActive
+  271:  (
+  272:  tmrTimerID_t timerID
+  273:  )
+  274:  {
+  275:    return TMR_GetTimerStatus(timerID) == mTmrStatusActive_c;
+  0000 ac000000 [8]             CALL  TMR_GetTimerStatus
+  0004 412002   [4]             CBEQA #32,L9 ;abs = 0009
+  0007 4f       [1]             CLRA  
+  0008 8d       [7]             RTC   
+  0009          L9:     
+  0009 a601     [2]             LDA   #1
+  276:  }                                       /* TMR_IsTimerActive() */
+  000b 8d       [7]             RTC   
+  277:  
+  278:  /****************************************************************************/
+  279:  
+  280:  /****************************************************************************
+  281:  *
+  282:  * Start a timer (BeeStack or application). When the timer goes off, call
+  283:  * the callback function in non-interrupt context.
+  284:  *
+  285:  *****************************************************************************/
+  286:  void TMR_StartTimer
+  287:  (
+  288:  tmrTimerID_t timerID,                       /* IN: */
+  289:  tmrTimerType_t timerType,                   /* IN: */
+  290:  tmrTimeInMilliseconds_t timeInMilliseconds, /* IN: */
+  291:  void (*pfTimerCallBack)(tmrTimerID_t)       /* IN: */
+  292:  )
+  293:  {
+  0000 a7fc     [2]             AIS   #-4
+  294:    tmrTimerTicks_t intervalInTicks;
+  295:    tmrTimerTableEntry_t *currentTimer = &maTmrTimerTable[timerID];
+  0002 95       [2]             TSX   
+  0003 e60f     [3]             LDA   15,X
+  0005 ae07     [2]             LDX   #7
+  0007 42       [5]             MUL   
+  0008 ab00     [2]             ADD   @maTmrTimerTable
+  000a 87       [2]             PSHA  
+  000b 4f       [1]             CLRA  
+  000c a900     [2]             ADC   @maTmrTimerTable:MSB
+  000e 87       [2]             PSHA  
+  000f 8a       [3]             PULH  
+  0010 88       [3]             PULX  
+  0011 9eff03   [5]             STHX  3,SP
+  296:    
+  297:    /* Stopping an already stopped timer is harmless. */
+  298:    TMR_StopTimer(timerID);
+  0014 95       [2]             TSX   
+  0015 e60f     [3]             LDA   15,X
+  0017 ac000000 [8]             CALL  TMR_StopTimer
+  299:    /* if it's a minute/second timer .intervalInTicks will count down the minutes/seconds
+  300:       and .countDown is initialized with ticks for one minute/second */
+  301:    
+  302:  #if gTMR_EnableMinutesSecondsTimers_d
+  303:    if (IsMinuteTimer(timerType)) 
+  001b 95       [2]             TSX   
+  001c e60e     [3]             LDA   14,X
+  001e a406     [2]             AND   #6
+  0020 a106     [2]             CMP   #6
+  0022 2614     [3]             BNE   L38 ;abs = 0038
+  304:    {
+  305:       currentTimer->intervalInTicks = (uint16_t)timeInMilliseconds;
+  0024 9efe03   [5]             LDHX  3,SP
+  0027 9ee60d   [4]             LDA   13,SP
+  002a f7       [2]             STA   ,X
+  002b 9ee60e   [4]             LDA   14,SP
+  002e e701     [3]             STA   1,X
+  306:       currentTimer->countDown = TmrTicksForOneMinute();
+  0030 a639     [2]             LDA   #57
+  0032 e702     [3]             STA   2,X
+  0034 a630     [2]             LDA   #48
+  307:    } 
+  0036 2053     [3]             BRA   L8B ;abs = 008b
+  0038          L38:    
+  308:    else 
+  309:    {  
+  310:      if (IsSecondTimer(timerType)) 
+  0038 e60e     [3]             LDA   14,X
+  003a a40a     [2]             AND   #10
+  003c a10a     [2]             CMP   #10
+  003e 2612     [3]             BNE   L52 ;abs = 0052
+  311:      {
+  312:        currentTimer->intervalInTicks = (uint16_t)timeInMilliseconds;
+  0040 9efe03   [5]             LDHX  3,SP
+  0043 9ee60d   [4]             LDA   13,SP
+  0046 f7       [2]             STA   ,X
+  0047 9ee60e   [4]             LDA   14,SP
+  004a e701     [3]             STA   1,X
+  313:        currentTimer->countDown = TmrTicksForOneSecond();
+  004c 6f02     [5]             CLR   2,X
+  004e a6f4     [2]             LDA   #-12
+  314:      } 
+  0050 2039     [3]             BRA   L8B ;abs = 008b
+  0052          L52:    
+  315:        else 
+  316:  #endif     /* gTMR_EnableMinutesSecondsTimers_d */
+  317:         { 
+  318:         /* here, the timer is single shot or interval in milliseconds*/
+  319:          intervalInTicks = TmrTicksFromMilliseconds(timeInMilliseconds);
+  0052 af0a     [2]             AIX   #10
+  0054 cd0000   [6]             JSR   _LMUL_RC
+  0057 00000139         DC.L  313
+  005b 95       [2]             TSX   
+  005c cd0000   [6]             JSR   _LDIVU_RC
+  005f 00000500         DC.L  1280
+  0063 95       [2]             TSX   
+  0064 e602     [3]             LDA   2,X
+  0066 87       [2]             PSHA  
+  0067 ee03     [3]             LDX   3,X
+  0069 8a       [3]             PULH  
+  006a 9eff09   [5]             STHX  9,SP
+  320:          if (!intervalInTicks) 
+  006d a708     [2]             AIS   #8
+  006f 2606     [3]             BNE   L77 ;abs = 0077
+  321:             intervalInTicks = 1;
+  0071 ae01     [2]             LDX   #1
+  0073 8c       [1]             CLRH  
+  0074 9eff01   [5]             STHX  1,SP
+  0077          L77:    
+  322:        
+  323:          currentTimer->intervalInTicks = intervalInTicks;
+  0077 9efe03   [5]             LDHX  3,SP
+  007a 9ee601   [4]             LDA   1,SP
+  007d f7       [2]             STA   ,X
+  007e 9ee602   [4]             LDA   2,SP
+  0081 e701     [3]             STA   1,X
+  324:          currentTimer->countDown = intervalInTicks;
+  0083 9ee601   [4]             LDA   1,SP
+  0086 e702     [3]             STA   2,X
+  0088 9ee602   [4]             LDA   2,SP
+  008b          L8B:    
+  008b e703     [3]             STA   3,X
+  325:         }
+  326:  #if gTMR_EnableMinutesSecondsTimers_d       
+  327:    }/* end else... if (timerType == gTmrMinuteTimer_c)... */
+  328:  #endif  /* gTMR_EnableMinutesSecondsTimers_d */
+  329:    
+  330:    
+  331:    TMR_SetTimerType(timerID, timerType);
+  008d 95       [2]             TSX   
+  008e ee0f     [3]             LDX   15,X
+  0090 9ee60f   [4]             LDA   15,SP
+  0093 ac000000 [8]             CALL  TMR_SetTimerType
+  332:    
+  333:    currentTimer->pfCallBack = pfTimerCallBack;
+  0097 9efe03   [5]             LDHX  3,SP
+  009a 9ee608   [4]             LDA   8,SP
+  009d e704     [3]             STA   4,X
+  009f 9ee609   [4]             LDA   9,SP
+  00a2 e705     [3]             STA   5,X
+  00a4 9ee60a   [4]             LDA   10,SP
+  00a7 e706     [3]             STA   6,X
+  334:    
+  335:    /* Enable timer, the timer task will do the rest of the work. */
+  336:    TMR_EnableTimer(timerID);
+  00a9 95       [2]             TSX   
+  00aa e60f     [3]             LDA   15,X
+  00ac ac000000 [8]             CALL  TMR_EnableTimer
+  337:  }                                       /* TMR_StartTimer() */
+  00b0 a704     [2]             AIS   #4
+  00b2 8d       [7]             RTC   
+  338:  
+  339:  /* Start a low power timer. When the timer goes off, call the callback function */
+  340:  /* in non-interrupt context. If the timer is running when this function */
+  341:  /* is called, it will be stopped and restarted. */
+  342:  /* Start the timer with the following timer types:
+  343:     gTmrLowPowerMinuteTimer_c
+  344:     gTmrLowPowerSecondTimer_c
+  345:     gTmrLowPowerSingleShotMillisTimer_c
+  346:     gTmrLowPowerIntervalMillisTimer_c
+  347:  */
+  348:  /* The MCU can enter in low power if there are only active low power timers */
+  349:  void TMR_StartLowPowerTimer
+  350:  (
+  351:  tmrTimerID_t timerId,
+  352:  tmrTimerType_t timerType,
+  353:  uint32_t timeIn,
+  354:  void (*pfTmrCallBack)(tmrTimerID_t)
+  355:  ) 
+  356:  {
+  357:  #if(gTMR_EnableLowPowerTimers_d)
+  358:    TMR_StartTimer(timerId, timerType | gTmrLowPowerTimer_c, timeIn, pfTmrCallBack);
+  359:  #else
+  360:  (void)timerId;
+  361:  (void)timerType;
+  362:  (void)timeIn;
+  363:  (void)pfTmrCallBack;
+  364:  #endif
+  365:  }
+  0000 8d       [7]             RTC   
+  366:  
+  367:  #if gTMR_EnableMinutesSecondsTimers_d
+  368:  /* Start a minute timer. */
+  369:  /* Note: this is a single shot timer. There are no interval minute timers. */
+  370:  void TMR_StartMinuteTimer
+  371:  (
+  372:  tmrTimerID_t timerId, 
+  373:  tmrTimeInMinutes_t timeInMinutes, 
+  374:  void (*pfTmrCallBack)(tmrTimerID_t)
+  375:  )
+  376:  {
+  377:   TMR_StartTimer(timerId, gTmrMinuteTimer_c, timeInMinutes, pfTmrCallBack);
+  0000 95       [2]             TSX   
+  0001 e608     [3]             LDA   8,X
+  0003 87       [2]             PSHA  
+  0004 a606     [2]             LDA   #6
+  0006 87       [2]             PSHA  
+  0007 9efe09   [5]             LDHX  9,SP
+  000a 89       [2]             PSHX  
+  000b 8b       [2]             PSHH  
+  000c 4f       [1]             CLRA  
+  000d 87       [2]             PSHA  
+  000e 87       [2]             PSHA  
+  000f 9efe0b   [5]             LDHX  11,SP
+  0012 89       [2]             PSHX  
+  0013 8b       [2]             PSHH  
+  0014 95       [2]             TSX   
+  0015 e60b     [3]             LDA   11,X
+  0017 87       [2]             PSHA  
+  0018 ac000000 [8]             CALL  TMR_StartTimer
+  001c a709     [2]             AIS   #9
+  378:  }
+  001e 8d       [7]             RTC   
+  379:  #endif /* gTMR_EnableMinutesSecondsTimers_d */
+  380:  
+  381:  
+  382:  #if gTMR_EnableMinutesSecondsTimers_d  
+  383:  /* Start a second timer. */
+  384:  /* Note: this is a single shot timer. There are no interval second timers. */
+  385:  void TMR_StartSecondTimer
+  386:  (
+  387:  tmrTimerID_t timerId, 
+  388:  tmrTimeInSeconds_t timeInSeconds, 
+  389:  void (*pfTmrCallBack)(tmrTimerID_t)
+  390:  ) 
+  391:  {
+  392:   TMR_StartTimer(timerId, gTmrSecondTimer_c, timeInSeconds, pfTmrCallBack);
+  0000 95       [2]             TSX   
+  0001 e608     [3]             LDA   8,X
+  0003 87       [2]             PSHA  
+  0004 a60a     [2]             LDA   #10
+  0006 87       [2]             PSHA  
+  0007 9efe09   [5]             LDHX  9,SP
+  000a 89       [2]             PSHX  
+  000b 8b       [2]             PSHH  
+  000c 4f       [1]             CLRA  
+  000d 87       [2]             PSHA  
+  000e 87       [2]             PSHA  
+  000f 9efe0b   [5]             LDHX  11,SP
+  0012 89       [2]             PSHX  
+  0013 8b       [2]             PSHH  
+  0014 95       [2]             TSX   
+  0015 e60b     [3]             LDA   11,X
+  0017 87       [2]             PSHA  
+  0018 ac000000 [8]             CALL  TMR_StartTimer
+  001c a709     [2]             AIS   #9
+  393:  }
+  001e 8d       [7]             RTC   
+  394:  #endif /* gTMR_EnableMinutesSecondsTimers_d */
+  395:   
+  396:  /****************************************************************************/
+  397:  
+  398:  void TMR_StartIntervalTimer
+  399:  (
+  400:  tmrTimerID_t timerID,
+  401:  tmrTimeInMilliseconds_t timeInMilliseconds,
+  402:  void (*pfTimerCallBack)(tmrTimerID_t)
+  403:  )
+  404:  {
+  405:    TMR_StartTimer(timerID, gTmrIntervalTimer_c, timeInMilliseconds, pfTimerCallBack);
+  0000 95       [2]             TSX   
+  0001 e60a     [3]             LDA   10,X
+  0003 87       [2]             PSHA  
+  0004 a602     [2]             LDA   #2
+  0006 87       [2]             PSHA  
+  0007 9efe0b   [5]             LDHX  11,SP
+  000a 89       [2]             PSHX  
+  000b 8b       [2]             PSHH  
+  000c 9efe0b   [5]             LDHX  11,SP
+  000f 89       [2]             PSHX  
+  0010 8b       [2]             PSHH  
+  0011 9efe0b   [5]             LDHX  11,SP
+  0014 89       [2]             PSHX  
+  0015 8b       [2]             PSHH  
+  0016 95       [2]             TSX   
+  0017 e60b     [3]             LDA   11,X
+  0019 87       [2]             PSHA  
+  001a ac000000 [8]             CALL  TMR_StartTimer
+  001e a709     [2]             AIS   #9
+  406:  }
+  0020 8d       [7]             RTC   
+  407:  
+  408:  void TMR_StartSingleShotTimer
+  409:  (
+  410:  tmrTimerID_t timerID,
+  411:  tmrTimeInMilliseconds_t timeInMilliseconds,
+  412:  void (*pfTimerCallBack)(tmrTimerID_t)
+  413:  )
+  414:  {
+  415:    TMR_StartTimer(timerID, gTmrSingleShotTimer_c, timeInMilliseconds, pfTimerCallBack);
+  0000 95       [2]             TSX   
+  0001 e60a     [3]             LDA   10,X
+  0003 87       [2]             PSHA  
+  0004 a601     [2]             LDA   #1
+  0006 87       [2]             PSHA  
+  0007 9efe0b   [5]             LDHX  11,SP
+  000a 89       [2]             PSHX  
+  000b 8b       [2]             PSHH  
+  000c 9efe0b   [5]             LDHX  11,SP
+  000f 89       [2]             PSHX  
+  0010 8b       [2]             PSHH  
+  0011 9efe0b   [5]             LDHX  11,SP
+  0014 89       [2]             PSHX  
+  0015 8b       [2]             PSHH  
+  0016 95       [2]             TSX   
+  0017 e60b     [3]             LDA   11,X
+  0019 87       [2]             PSHA  
+  001a ac000000 [8]             CALL  TMR_StartTimer
+  001e a709     [2]             AIS   #9
+  416:  }
+  0020 8d       [7]             RTC   
+  417:  
+  418:  /****************************************************************************/
+  419:  
+  420:  /* Stop a timer. Does not free the timer; does not call the timer's callback
+  421:  * function.
+  422:  *
+  423:  * Harmless if the timer is already inactive.
+  424:  */
+  425:  void TMR_StopTimer
+  426:  (
+  427:  tmrTimerID_t timerID
+  428:  )
+  429:  {
+  0000 87       [2]             PSHA  
+  0001 8b       [2]             PSHH  
+  430:    tmrStatus_t status;
+  431:    uint8_t ccr;
+  432:    
+  433:    IrqControlLib_BackupIrqStatus(ccr);
+  0002 85       [1]             TPA   
+  0003 95       [2]             TSX   
+  0004 f7       [2]             STA   ,X
+  434:    IrqControlLib_DisableAllIrqs();
+  0005 9b       [1]             SEI   
+  435:    status = TMR_GetTimerStatus(timerID);
+  0006 e601     [3]             LDA   1,X
+  0008 ac000000 [8]             CALL  TMR_GetTimerStatus
+  436:    if (   (status == mTmrStatusActive_c) ||
+  000c 412004   [4]             CBEQA #32,L13 ;abs = 0013
+  437:           (status == mTmrStatusReady_c)
+  000f a140     [2]             CMP   #64
+  0011 262f     [3]             BNE   L42 ;abs = 0042
+  0013          L13:    
+  438:       ) 
+  439:    {
+  440:          TMR_SetTimerStatus(timerID, mTmrStatusInactive_c);
+  0013 95       [2]             TSX   
+  0014 ee01     [3]             LDX   1,X
+  0016 a680     [2]             LDA   #-128
+  0018 ac000000 [8]             CALL  TMR_SetTimerStatus
+  441:          DecrementActiveTimerNumber(TMR_GetTimerType(timerID));
+  001c 95       [2]             TSX   
+  001d e601     [3]             LDA   1,X
+  001f ac000000 [8]             CALL  TMR_GetTimerType
+  0023 a510     [2]             BIT   #16
+  0025 2605     [3]             BNE   L2C ;abs = 002c
+  0027 450000   [3]             LDHX  @numberOfActiveTimers
+  002a 2003     [3]             BRA   L2F ;abs = 002f
+  002c          L2C:    
+  002c 450000   [3]             LDHX  @numberOfLowPowerActiveTimers
+  002f          L2F:    
+  002f 7a       [4]             DEC   ,X
+  442:          /* if no sw active timers are enabled, */
+  443:          /* call the TMR_Task() to countdown the ticks and stop the hw timer*/
+  444:      		if (!numberOfActiveTimers && !numberOfLowPowerActiveTimers) 
+  0030 c60000   [4]             LDA   numberOfLowPowerActiveTimers
+  0033 ca0000   [4]             ORA   numberOfActiveTimers
+  0036 260a     [3]             BNE   L42 ;abs = 0042
+  445:      		   TS_SendEvent(gTimerTaskID, mTMR_Event_c);
+  0038 c60000   [4]             LDA   gTimerTaskID
+  003b ae01     [2]             LDX   #1
+  003d 8c       [1]             CLRH  
+  003e ac000000 [8]             CALL  TS_SendEvent
+  0042          L42:    
+  446:  
+  447:    }
+  448:    IrqControlLib_RestoreIrqStatus(ccr);    
+  0042 95       [2]             TSX   
+  0043 f6       [3]             LDA   ,X
+  0044 84       [1]             TAP   
+  449:  }  
+  0045 a702     [2]             AIS   #2
+  0047 8d       [7]             RTC   
+  450:  /*****************************************************************************/
+  451:  
+  452:  /*****************************************************************************
+  453:  * Timer task. Called by the kernel when the timer ISR posts a timer event.
+  454:  ******************************************************************************/
+  455:  void TMR_Task
+  456:  (
+  457:  event_t events
+  458:  )
+  459:  {
+  0000 a7ed     [2]             AIS   #-19
+  460:    pfTmrCallBack_t pfCallBack;
+  461:    uint16_t currentTimeInTicks;
+  462:    uint16_t nextInterruptTime;
+  463:    tmrTimerStatus_t status;
+  464:    uint16_t ticksSinceLastHere;
+  465:    index_t timerID;
+  466:    uint16_t ticksdiff;   
+  467:    uint8_t ccr;
+  468:    tmrTimerTableEntry_t *currentTimer;
+  469:  #if gTMR_EnableMinutesSecondsTimers_d 
+  470:    uint8_t stopIt = FALSE; 
+  0002 95       [2]             TSX   
+  0003 6f12     [5]             CLR   18,X
+  471:  #endif /* gTMR_EnableMinutesSecondsTimers_d */
+  472:    tmrTimerType_t timerType; 
+  473:    (void)events;
+  474:    
+  475:    IrqControlLib_BackupIrqStatus(ccr);
+  0005 85       [1]             TPA   
+  0006 e705     [3]             STA   5,X
+  476:    IrqControlLib_DisableAllIrqs();  
+  0008 9b       [1]             SEI   
+  0009 ac0001aa [8]             CALL  TMR_Task:426
+  000d ac0001aa [8]             CALL  TMR_Task:426
+  477:    TpmReadCNTRegister(currentTimeInTicks);
+  478:    
+  479:    #ifdef PROCESSOR_MC1323X  
+  480:     TpmReadCNTRegister(currentTimeInTicks);
+  0011 320000   [5]             LDHX  mTmrRead16bitReg
+  0014 9eff07   [5]             STHX  7,SP
+  481:    #endif
+  482:    IrqControlLib_RestoreIrqStatus(ccr);
+  0017 95       [2]             TSX   
+  0018 e605     [3]             LDA   5,X
+  001a 84       [1]             TAP   
+  483:    
+  484:    /* calculate difference between current and previous. This scheme works up to 32K of difference */
+  485:    ticksSinceLastHere = (uint16_t)((int16_t)currentTimeInTicks - (int16_t)previousTimeInTicks);
+  001b e607     [3]             LDA   7,X
+  001d c00001   [4]             SUB   previousTimeInTicks:1
+  0020 87       [2]             PSHA  
+  0021 e606     [3]             LDA   6,X
+  0023 c20000   [4]             SBC   previousTimeInTicks
+  0026 87       [2]             PSHA  
+  0027 8a       [3]             PULH  
+  0028 88       [3]             PULX  
+  0029 9eff0d   [5]             STHX  13,SP
+  486:    
+  487:    /* remember for next time */
+  488:    previousTimeInTicks = currentTimeInTicks;
+  002c 9efe07   [5]             LDHX  7,SP
+  002f 960000   [5]             STHX  previousTimeInTicks
+  489:   
+  490:      /* Find the shortest active timer. */
+  491:    nextInterruptTime = mMaxToCountDown_c;
+  0032 457ffe   [3]             LDHX  #32766
+  0035 9eff02   [5]             STHX  2,SP
+  492:    
+  493:    for (timerID = 0; timerID < NumberOfElements(maTmrTimerTable); ++timerID) 
+  0038 95       [2]             TSX   
+  0039 7f       [4]             CLR   ,X
+  003a          L3A:    
+  494:    {
+  495:      /* Pointer to the current timer. Optimize the code size */
+  496:      currentTimer = &maTmrTimerTable[timerID];
+  003a f6       [3]             LDA   ,X
+  003b ae07     [2]             LDX   #7
+  003d 42       [5]             MUL   
+  003e ab00     [2]             ADD   @maTmrTimerTable
+  0040 87       [2]             PSHA  
+  0041 4f       [1]             CLRA  
+  0042 a900     [2]             ADC   @maTmrTimerTable:MSB
+  0044 87       [2]             PSHA  
+  0045 8a       [3]             PULH  
+  0046 88       [3]             PULX  
+  0047 9eff04   [5]             STHX  4,SP
+  497:      
+  498:      IrqControlLib_BackupIrqStatus(ccr);
+  004a 85       [1]             TPA   
+  004b 95       [2]             TSX   
+  004c e705     [3]             STA   5,X
+  499:      IrqControlLib_DisableAllIrqs();
+  004e 9b       [1]             SEI   
+  500:      status = TMR_GetTimerStatus(timerID);
+  004f f6       [3]             LDA   ,X
+  0050 ac000000 [8]             CALL  TMR_GetTimerStatus
+  0054 95       [2]             TSX   
+  0055 e711     [3]             STA   17,X
+  501:  
+  502:      if (status == mTmrStatusReady_c) 
+  0057 a140     [2]             CMP   #64
+  0059 260d     [3]             BNE   L68 ;abs = 0068
+  503:      {
+  504:        /* If TMR_StartTimer() has been called for this timer, start it's count */
+  505:        /* down as of now. */
+  506:        TMR_SetTimerStatus(timerID, mTmrStatusActive_c);            
+  005b fe       [3]             LDX   ,X
+  005c a620     [2]             LDA   #32
+  005e ac000000 [8]             CALL  TMR_SetTimerStatus
+  507:        IrqControlLib_RestoreIrqStatus(ccr);
+  0062 95       [2]             TSX   
+  0063 e605     [3]             LDA   5,X
+  0065 84       [1]             TAP   
+  508:      }
+  0066 206f     [3]             BRA   LD7 ;abs = 00d7
+  0068          L68:    
+  509:      else
+  510:      {          
+  511:        IrqControlLib_RestoreIrqStatus(ccr);        
+  0068 e605     [3]             LDA   5,X
+  006a 84       [1]             TAP   
+  512:        
+  513:        /* Process the active timers. This does not includes the Ready timers started in this loop */
+  514:        if (status == mTmrStatusActive_c) 
+  006b e611     [3]             LDA   17,X
+  006d a120     [2]             CMP   #32
+  006f 2666     [3]             BNE   LD7 ;abs = 00d7
+  515:        {      
+  516:          /* This timer is active. Decrement it's countdown. If the countdown */
+  517:          /* reaches zero, the timer is expired. */
+  518:          if (currentTimer->countDown > ticksSinceLastHere) 
+  0071 9efe04   [5]             LDHX  4,SP
+  0074 9ece02   [5]             LDHX  2,X
+  0077 9ef30d   [6]             CPHX  13,SP
+  007a 2313     [3]             BLS   L8F ;abs = 008f
+  519:          {
+  520:           currentTimer->countDown -= ticksSinceLastHere;
+  007c 9efe04   [5]             LDHX  4,SP
+  007f e603     [3]             LDA   3,X
+  0081 9ee00e   [4]             SUB   14,SP
+  0084 e703     [3]             STA   3,X
+  0086 e602     [3]             LDA   2,X
+  0088 9ee20d   [4]             SBC   13,SP
+  008b e702     [3]             STA   2,X
+  008d          L8D:    
+  521:          }
+  008d 2048     [3]             BRA   LD7 ;abs = 00d7
+  008f          L8F:    
+  522:          else
+  523:          {       
+  524:           bool_t callbackCall = TRUE;
+  008f a601     [2]             LDA   #1
+  0091 95       [2]             TSX   
+  0092 e70e     [3]             STA   14,X
+  525:           /* Timer countDown expired */
+  526:           
+  527:           /* Get timer type to detect it*/
+  528:           timerType = TMR_GetTimerType(timerID); 
+  0094 f6       [3]             LDA   ,X
+  0095 ac000000 [8]             CALL  TMR_GetTimerType
+  0099 95       [2]             TSX   
+  009a e70b     [3]             STA   11,X
+  529:                  
+  530:           #if gTMR_EnableMinutesSecondsTimers_d   
+  531:           /* check if a second/minute expired, load the next one  */
+  532:           if (IsMinuteTimer(timerType) || IsSecondTimer(timerType)) 
+  009c a406     [2]             AND   #6
+  009e 410608   [4]             CBEQA #6,LA9 ;abs = 00a9
+  00a1 e60b     [3]             LDA   11,X
+  00a3 a40a     [2]             AND   #10
+  00a5 a10a     [2]             CMP   #10
+  00a7 2630     [3]             BNE   LD9 ;abs = 00d9
+  00a9          LA9:    
+  533:           {
+  534:             /* Check if the minute/second timer expired */
+  535:             if(currentTimer->intervalInTicks > 1) 
+  00a9 9efe04   [5]             LDHX  4,SP
+  00ac 9eae     [5]             LDHX  ,X
+  00ae 650001   [3]             CPHX  #1
+  00b1 2338     [3]             BLS   LEB ;abs = 00eb
+  536:             {
+  537:               --currentTimer->intervalInTicks; 
+  00b3 9efe04   [5]             LDHX  4,SP
+  00b6 6d01     [4]             TST   1,X
+  00b8 2601     [3]             BNE   LBB ;abs = 00bb
+  00ba 7a       [4]             DEC   ,X
+  00bb          LBB:    
+  00bb 6a01     [5]             DEC   1,X
+  538:               /* Load with next minute/second to count down */
+  539:               if(IsMinuteTimer(timerType))
+  00bd 9ee60c   [4]             LDA   12,SP
+  00c0 a406     [2]             AND   #6
+  00c2 a106     [2]             CMP   #6
+  00c4 2608     [3]             BNE   LCE ;abs = 00ce
+  540:               {            
+  541:                 currentTimer->countDown = TmrTicksForOneMinute();
+  00c6 a639     [2]             LDA   #57
+  00c8 e702     [3]             STA   2,X
+  00ca a630     [2]             LDA   #48
+  542:               }
+  00cc 2004     [3]             BRA   LD2 ;abs = 00d2
+  00ce          LCE:    
+  543:               else
+  544:               {            
+  545:                 /* else if it's a second timer */
+  546:                 currentTimer->countDown = TmrTicksForOneSecond();
+  00ce 6f02     [5]             CLR   2,X
+  00d0 a6f4     [2]             LDA   #-12
+  00d2          LD2:    
+  00d2 e703     [3]             STA   3,X
+  547:               }
+  548:  
+  549:              callbackCall = FALSE;
+  00d4 95       [2]             TSX   
+  00d5 6f0e     [5]             CLR   14,X
+  00d7          LD7:    
+  550:             } 
+  00d7 2046     [3]             BRA   L11F ;abs = 011f
+  00d9          LD9:    
+  551:             else 
+  552:             {          
+  553:               /* Minute/second Timer expired... stop it */
+  554:               TMR_StopTimer(timerID);
+  555:             }
+  556:           } 
+  557:           else 
+  558:           #endif /* gTMR_EnableMinutesSecondsTimers_d */
+  559:           {
+  560:             /* If this is an interval millisec. timer, restart it */
+  561:             if (timerType & gTmrIntervalTimer_c)
+  00d9 e60b     [3]             LDA   11,X
+  00db a502     [2]             BIT   #2
+  00dd 270c     [3]             BEQ   LEB ;abs = 00eb
+  562:             {          
+  563:              currentTimer->countDown = currentTimer->intervalInTicks;
+  00df 9efe04   [5]             LDHX  4,SP
+  00e2 f6       [3]             LDA   ,X
+  00e3 e702     [3]             STA   2,X
+  00e5 e601     [3]             LDA   1,X
+  00e7 e703     [3]             STA   3,X
+  564:             }
+  00e9 2006     [3]             BRA   LF1 ;abs = 00f1
+  00eb          LEB:    
+  565:             else
+  566:             {
+  567:              TMR_StopTimer(timerID);
+  00eb 95       [2]             TSX   
+  00ec f6       [3]             LDA   ,X
+  00ed ac000000 [8]             CALL  TMR_StopTimer
+  00f1          LF1:    
+  568:             }
+  569:           }
+  570:           
+  571:           if(callbackCall)
+  00f1 95       [2]             TSX   
+  00f2 6d0e     [4]             TST   14,X
+  00f4 2729     [3]             BEQ   L11F ;abs = 011f
+  572:           {        
+  573:             /* This timer has expired. */
+  574:             pfCallBack = currentTimer->pfCallBack;
+  00f6 9efe04   [5]             LDHX  4,SP
+  00f9 e604     [3]             LDA   4,X
+  00fb 9ee709   [4]             STA   9,SP
+  00fe 9ece05   [5]             LDHX  5,X
+  0101 9eff0a   [5]             STHX  10,SP
+  575:        
+  576:             /* Call callback if it is not NULL. This is done after the timer got updated,
+  577:              * in case the timer gets stopped or restarted in the callback
+  578:              */
+  579:              if (pfCallBack) 
+  0104 95       [2]             TSX   
+  0105 af08     [2]             AIX   #8
+  0107 cd0000   [6]             JSR   _CMP24_RC
+  010a 00               DC.B  0
+  010b 0000             DC.W  0
+  010d 2710     [3]             BEQ   L11F ;abs = 011f
+  580:              {
+  581:               pfCallBack(timerID);
+  010f 9efe0a   [5]             LDHX  10,SP
+  0112 8b       [2]             PSHH  
+  0113 8b       [2]             PSHH  
+  0114 9ee603   [4]             LDA   3,SP
+  0117 87       [2]             PSHA  
+  0118 9ee60c   [4]             LDA   12,SP
+  011b ac000000 [8]             CALL  _CALL_STAR08_FAR
+  011f          L11F:   
+  582:              }
+  583:           }
+  584:           
+  585:          }
+  586:        }
+  587:        
+  588:      } // end else if (status == mTmrStatusReady_c)     
+  589:      
+  590:      /* Timer is still active (not stopped)? 
+  591:       * This test includes the Ready timers started in this loop
+  592:       */
+  593:       if (TMR_GetTimerStatus(timerID) == mTmrStatusActive_c) 
+  011f 95       [2]             TSX   
+  0120 f6       [3]             LDA   ,X
+  0121 ac000000 [8]             CALL  TMR_GetTimerStatus
+  0125 a120     [2]             CMP   #32
+  0127 2614     [3]             BNE   L13D ;abs = 013d
+  594:       {           
+  595:          if (nextInterruptTime > currentTimer->countDown) 
+  0129 9efe04   [5]             LDHX  4,SP
+  012c 9ece02   [5]             LDHX  2,X
+  012f 9ef302   [6]             CPHX  2,SP
+  0132 2409     [3]             BCC   L13D ;abs = 013d
+  596:          {
+  597:            nextInterruptTime = currentTimer->countDown;
+  0134 9efe04   [5]             LDHX  4,SP
+  0137 9ece02   [5]             LDHX  2,X
+  013a 9eff02   [5]             STHX  2,SP
+  013d          L13D:   
+  013d 95       [2]             TSX   
+  013e 7c       [4]             INC   ,X
+  013f f6       [3]             LDA   ,X
+  0140 a122     [2]             CMP   #34
+  0142 2403     [3]             BCC   L147 ;abs = 0147
+  0144 cc003a   [4]             JMP   L3A ;abs = 003a
+  0147          L147:   
+  598:          }
+  599:       }
+  600:  
+  601:    } // end for
+  602:    
+  603:    
+  604:    IrqControlLib_BackupIrqStatus(ccr);
+  0147 85       [1]             TPA   
+  0148 e705     [3]             STA   5,X
+  605:    IrqControlLib_DisableAllIrqs();
+  014a 9b       [1]             SEI   
+  606:    
+  607:    /* Update the compare register */
+  608:    nextInterruptTime += currentTimeInTicks;
+  014b e607     [3]             LDA   7,X
+  014d eb02     [3]             ADD   2,X
+  014f e702     [3]             STA   2,X
+  0151 e601     [3]             LDA   1,X
+  0153 e906     [3]             ADC   6,X
+  0155 e701     [3]             STA   1,X
+  609:    
+  610:    #ifndef PROCESSOR_QE128
+  611:     gTPMxCnVL_c = TPMxCnVLvalue(nextInterruptTime);
+  0157 ee02     [3]             LDX   2,X
+  0159 bf0f     [3]             STX   15
+  612:     gTPMxCnVH_c = TPMxCnVHvalue(nextInterruptTime);
+  015b b70e     [3]             STA   14
+  613:    #endif
+  614:    
+  615:    /* Check to be sure that the timer was not programmed in the past for different source clocks.
+  616:     * The interrupts are now disabled.
+  617:     */      	 
+  618:    TpmReadCNTRegister(ticksdiff);  
+  015d be09     [3]             LDX   9
+  015f cf0000   [4]             STX   mTmrRead16bitReg
+  0162 be0a     [3]             LDX   10
+  0164 cf0001   [4]             STX   mTmrRead16bitReg:1
+  0167 320000   [5]             LDHX  mTmrRead16bitReg
+  016a 9eff10   [5]             STHX  16,SP
+  619:    
+  620:    #ifdef PROCESSOR_QE128
+  621:     /* Always program minimum 2 ticks ahead on QE128 */ 
+  622:     if(((int16_t)nextInterruptTime - (int16_t)ticksdiff) < 2 )
+  623:     {
+  624:       nextInterruptTime = ticksdiff + 2;
+  625:     }
+  626:     gTPMxCnVL_c = TPMxCnVLvalue(nextInterruptTime);
+  627:     gTPMxCnVH_c = TPMxCnVHvalue(nextInterruptTime);
+  628:   
+  629:    #else
+  630:      
+  631:     if((((int16_t)ticksdiff - (int16_t)nextInterruptTime) >= 0) && (!(gTPMxCnSC_c & gTPMxCnSC_F_c)))
+  016d 95       [2]             TSX   
+  016e e610     [3]             LDA   16,X
+  0170 e002     [3]             SUB   2,X
+  0172 e60f     [3]             LDA   15,X
+  0174 e201     [3]             SBC   1,X
+  0176 4d       [1]             TSTA  
+  0177 910d     [3]             BLT   L186 ;abs = 0186
+  0179 0e0d0a   [5]             BRSET 7,13,L186 ;abs = 0186
+  632:     {  
+  633:       /* Timer counter passed the comparator value. The Compare Flag was not set */
+  634:       /* The compare register was programmed in the past. The next interrupt time has already passed */
+  635:       TS_SendEvent(gTimerTaskID, mTMR_Event_c);
+  017c c60000   [4]             LDA   gTimerTaskID
+  017f ae01     [2]             LDX   #1
+  0181 8c       [1]             CLRH  
+  0182 ac000000 [8]             CALL  TS_SendEvent
+  0186          L186:   
+  636:     }
+  637:     
+  638:    #endif 
+  639:    
+  640:    IrqControlLib_RestoreIrqStatus(ccr);   
+  0186 95       [2]             TSX   
+  0187 e605     [3]             LDA   5,X
+  0189 84       [1]             TAP   
+  641:  
+  642:    if (!numberOfActiveTimers && !numberOfLowPowerActiveTimers) {
+  018a c60000   [4]             LDA   numberOfLowPowerActiveTimers
+  018d ca0000   [4]             ORA   numberOfActiveTimers
+  0190 2605     [3]             BNE   L197 ;abs = 0197
+  643:      TpmStopTimerHardware();
+  0192 3f08     [5]             CLR   8
+  644:      timerHardwareIsRunning = FALSE;
+  0194 4f       [1]             CLRA  
+  645:    } else if (!timerHardwareIsRunning) {
+  0195 200d     [3]             BRA   L1A4 ;abs = 01a4
+  0197          L197:   
+  0197 c60000   [4]             LDA   timerHardwareIsRunning
+  019a 260b     [3]             BNE   L1A7 ;abs = 01a7
+  646:      TpmStartTimerHardware();
+  019c b608     [3]             LDA   8
+  019e aa1f     [2]             ORA   #31
+  01a0 b708     [3]             STA   8
+  647:      timerHardwareIsRunning = TRUE;
+  01a2 a601     [2]             LDA   #1
+  01a4          L1A4:   
+  01a4 c70000   [4]             STA   timerHardwareIsRunning
+  01a7          L1A7:   
+  648:    }
+  649:  }                                       /* TMR_Task() */
+  01a7 a713     [2]             AIS   #19
+  01a9 8d       [7]             RTC   
+  01aa          L1AA:   
+  01aa b609     [3]             LDA   9
+  01ac c70000   [4]             STA   mTmrRead16bitReg
+  01af b60a     [3]             LDA   10
+  01b1 c70001   [4]             STA   mTmrRead16bitReg:1
+  01b4 8d       [7]             RTC   
+  650:  /*****************************************************************************/
+  651:  
+  652:  /* Enable or disable the timer tmrID
+  653:     If enable = TRUE timer is active
+  654:     Else timer is inactive 
+  655:  */
+  656:  void TMR_EnableTimer(tmrTimerID_t tmrID)
+  657:  {    
+  0000 87       [2]             PSHA  
+  0001 8b       [2]             PSHH  
+  658:    uint8_t ccr;
+  659:    
+  660:    IrqControlLib_BackupIrqStatus(ccr);
+  0002 85       [1]             TPA   
+  0003 95       [2]             TSX   
+  0004 f7       [2]             STA   ,X
+  661:    IrqControlLib_DisableAllIrqs();
+  0005 9b       [1]             SEI   
+  662:    if (TMR_GetTimerStatus(tmrID) == mTmrStatusInactive_c)
+  0006 e601     [3]             LDA   1,X
+  0008 ac000000 [8]             CALL  TMR_GetTimerStatus
+  000c a180     [2]             CMP   #-128
+  000e 2627     [3]             BNE   L37 ;abs = 0037
+  663:    {      
+  664:      IncrementActiveTimerNumber(TMR_GetTimerType(tmrID));    
+  0010 95       [2]             TSX   
+  0011 e601     [3]             LDA   1,X
+  0013 ac000000 [8]             CALL  TMR_GetTimerType
+  0017 a510     [2]             BIT   #16
+  0019 2605     [3]             BNE   L20 ;abs = 0020
+  001b 450000   [3]             LDHX  @numberOfActiveTimers
+  001e 2003     [3]             BRA   L23 ;abs = 0023
+  0020          L20:    
+  0020 450000   [3]             LDHX  @numberOfLowPowerActiveTimers
+  0023          L23:    
+  0023 7c       [4]             INC   ,X
+  665:      TMR_SetTimerStatus(tmrID, mTmrStatusReady_c);
+  0024 95       [2]             TSX   
+  0025 ee01     [3]             LDX   1,X
+  0027 a640     [2]             LDA   #64
+  0029 ac000000 [8]             CALL  TMR_SetTimerStatus
+  666:      TS_SendEvent(gTimerTaskID, mTMR_Event_c);
+  002d c60000   [4]             LDA   gTimerTaskID
+  0030 ae01     [2]             LDX   #1
+  0032 8c       [1]             CLRH  
+  0033 ac000000 [8]             CALL  TS_SendEvent
+  0037          L37:    
+  667:    }  
+  668:    IrqControlLib_RestoreIrqStatus(ccr);
+  0037 95       [2]             TSX   
+  0038 f6       [3]             LDA   ,X
+  0039 84       [1]             TAP   
+  669:  }
+  003a a702     [2]             AIS   #2
+  003c 8d       [7]             RTC   
+  670:  /*****************************************************************************/
+  671:  
+  672:  /*
+  673:  This function is called by Low Power module; Also this function stops the 
+  674:  harware timer.
+  675:  Return: time in millisecond that wasn't counted before entering in sleep  
+  676:  */
+  677:  #if (gTMR_EnableLowPowerTimers_d)
+  678:  uint32_t TMR_NotCountedMillisTimeBeforeSleep(void)
+  679:  {
+  680:    uint16_t currentTimeInTicks;
+  681:    
+  682:    if (!numberOfLowPowerActiveTimers)
+  683:      return 0;
+  684:    TpmReadCNTRegister(currentTimeInTicks);
+  685:    TpmStopTimerHardware();
+  686:    timerHardwareIsRunning = FALSE; 
+  687:       
+  688:    return  TmrMillisecondsFromTicks((currentTimeInTicks - previousTimeInTicks));
+  689:  
+  690:  } 
+  691:  #else
+  692:  uint32_t TMR_NotCountedMillisTimeBeforeSleep(void)
+  693:  {
+  694:   return 0;
+  0000 7f       [4]             CLR   ,X
+  0001 6f01     [5]             CLR   1,X
+  0003 6f02     [5]             CLR   2,X
+  0005 6f03     [5]             CLR   3,X
+  695:  }
+  0007 8d       [7]             RTC   
+  696:  #endif /* #if (gTMR_EnableLowPowerTimers_d) */
+  697:  
+  698:  
+  699:  /*****************************************************************************/
+  700:        
+  701:  /* This function is called by the Low Power Module */
+  702:  /* each time the MCU wakes up */ 
+  703:  /* The function make an approximate sync. the active low power timers. */   
+  704:  
+  705:  #if (gTMR_EnableLowPowerTimers_d)                            
+  706:  void TMR_SyncLpmTimers(tmrTimeInMilliseconds_t sleepDurationMillisec) 
+  707:  {
+  708:  #if gTMR_EnableMinutesSecondsTimers_d
+  709:   uint16_t spentSeconds = 0;
+  710:   uint16_t spentMinutes = 0;
+  711:   uint16_t restTicksForMinutes = 0;
+  712:   uint16_t restTicksForSeconds = 0;
+  713:  #endif /* gTMR_EnableMinutesSecondsTimers_d */ 
+  714:   uint32_t durationMillis = sleepDurationMillisec;
+  715:   index_t  timerID;
+  716:   tmrTimerType_t timerType;
+  717:   tmrTimerTableEntry_t *currentTimer;
+  718:   
+  719:   /* Check if there are low power active timer */
+  720:   if (!numberOfLowPowerActiveTimers)
+  721:      return;
+  722:   
+  723:  #if gTMR_EnableMinutesSecondsTimers_d           
+  724:   /* Calc the units spent in sleep mode - minutes and seconds */
+  725:   while(durationMillis >= mOneMinute_c) 
+  726:   {
+  727:     durationMillis -= mOneMinute_c;
+  728:     spentMinutes++;
+  729:     if(spentSeconds < ((uint16_t)0xFFFE-60)) 
+  730:     {    
+  731:      spentSeconds+=60;
+  732:     }
+  733:        
+  734:   }
+  735:   /* durationMillis now indicates the rest of milliseconds spent after spentMinutes */
+  736:   restTicksForMinutes = TmrTicksFromMilliseconds(durationMillis);
+  737:     
+  738:   while(durationMillis >= mOneSecond_c) 
+  739:   {
+  740:     durationMillis -= mOneSecond_c;
+  741:     if(spentSeconds < (uint16_t)0xFFFE) 
+  742:     {    
+  743:      spentSeconds++;
+  744:     }
+  745:   }
+  746:   /* durationMillis now indicates the rest of milliseconds spent after spentSeconds */
+  747:   restTicksForSeconds = TmrTicksFromMilliseconds(durationMillis);
+  748:  #endif /* gTMR_EnableMinutesSecondsTimers_d */
+  749:  
+  750:  /* For each timer, detect the timer type and count down the spent duration in sleep */  
+  751:  for (timerID = 0; timerID < NumberOfElements(maTmrTimerTable); ++timerID) 
+  752:  {
+  753:  
+  754:    /* Detect the timer type and count down the spent duration in sleep */
+  755:    timerType = TMR_GetTimerType(timerID);
+  756:    
+  757:    currentTimer = &maTmrTimerTable[timerID];
+  758:    
+  759:    /* Sync. only the low power timers that are active */
+  760:    if ( (TMR_GetTimerStatus(timerID) == mTmrStatusActive_c)
+  761:          && (IsLowPowerTimer(timerType)) ) 
+  762:    {
+  763:  #if gTMR_EnableMinutesSecondsTimers_d
+  764:  
+  765:           if (IsLowPowerSecondTimer(timerType) || IsLowPowerMinuteTimer(timerType)) 
+  766:           {
+  767:             bool_t timerExpired = FALSE;
+  768:             
+  769:             uint16_t spentUnits = spentSeconds; /* seconds or minutes depending on the timer type */
+  770:             uint16_t millisecInUnit = mOneSecond_c;          
+  771:             uint16_t restTicks = restTicksForSeconds;
+  772:             
+  773:             if(IsLowPowerMinuteTimer(timerType)) 
+  774:             {
+  775:              spentUnits = spentMinutes;
+  776:              millisecInUnit = mOneMinute_c;
+  777:              restTicks = restTicksForMinutes;
+  778:             }           
+  779:                                   
+  780:             /* Timer expired while MCU was in sleep mode??? */
+  781:             /* SleepUnits + SleepMilliseconds <> RemainingUnits + RemainingMiliseconds */
+  782:             
+  783:             /* currentTimer->intervalInTicks is decremented only after the countdown has expired */
+  784:             
+  785:             if(currentTimer->intervalInTicks < (spentUnits + 1)) 
+  786:             {
+  787:                /* More units spent in sleep mode than remaining timer units */
+  788:                timerExpired = TRUE;
+  789:             } 
+  790:             else            
+  791:             {
+  792:               
+  793:               if( currentTimer->intervalInTicks  == (spentUnits + 1))
+  794:               {            
+  795:                  /* Same units in sleep mode as remaing timer units */
+  796:                  if((uint32_t)currentTimer->countDown <= restTicks) 
+  797:                  {                                
+  798:                    /* Remaining milliseconds are grater than the remaining timer ticks */
+  799:                    timerExpired = TRUE;
+  800:                  }
+  801:                  else 
+  802:                  {
+  803:                   currentTimer->intervalInTicks = 0;
+  804:                   currentTimer->countDown -= restTicks;
+  805:                  }              
+  806:               } 
+  807:               else 
+  808:               {
+  809:                 /* Less units spent in sleep mode than remaining timer units */
+  810:                 currentTimer->intervalInTicks -= spentUnits;
+  811:                 
+  812:                 
+  813:                 if(currentTimer->countDown >=  restTicks) 
+  814:                 {                
+  815:                  currentTimer->countDown -= restTicks;
+  816:                 } 
+  817:                 else 
+  818:                 {
+  819:                   /* Remaining milliseconds are grater than remaining timer ticks */
+  820:                   /* Decrement the number of units and recalculate the timer ticks */
+  821:                   currentTimer->intervalInTicks--;
+  822:                   currentTimer->countDown += (uint16_t)(TmrTicksFromMilliseconds(millisecInUnit) - restTicks);
+  823:                 }
+  824:                 
+  825:               }                           
+  826:             }
+  827:             
+  828:             if(timerExpired) 
+  829:             {
+  830:                currentTimer->intervalInTicks = 0;
+  831:                currentTimer->countDown = 0;
+  832:             }
+  833:           }
+  834:           /* here the timer is a millisecond one (single shot or interval)*/
+  835:           else 
+  836:  #endif  /* gTMR_EnableMinutesSecondsTimers_d */
+  837:           {
+  838:             /* how many millisecond counts the timer */
+  839:             durationMillis = TmrMillisecondsFromTicks(currentTimer->countDown);
+  840:             /* Timer expired when MCU was in sleep mode??? */
+  841:             if(durationMillis <= sleepDurationMillisec) 
+  842:             {
+  843:              currentTimer->countDown = 0;
+  844:             } 
+  845:             else 
+  846:             {
+  847:               /* calculate remaining tick to count after wake up */
+  848:               durationMillis -= sleepDurationMillisec;
+  849:               currentTimer->countDown = TmrTicksFromMilliseconds(durationMillis);
+  850:             }
+  851:  
+  852:             
+  853:           } /* end if (IsLowPowerSecondTimer(timerType) || IsLowPowerMinuteTimer(timerType)) */
+  854:          
+  855:     }
+  856:  
+  857:  }/* end for (timerID = 0;.... */
+  858:  
+  859:  TpmStartTimerHardware();
+  860:  TpmReadCNTRegister(previousTimeInTicks);
+  861:  
+  862:  TS_SendEvent(gTimerTaskID, mTMR_Event_c);
+  863:  }
+  864:  #else
+  865:  void TMR_SyncLpmTimers(tmrTimeInMilliseconds_t sleepDurationMillisec) 
+  866:  {
+  867:  (void)sleepDurationMillisec;
+  868:  }
+  0000 8d       [7]             RTC   
+  869:  #endif /* #if (gTMR_EnableLowPowerTimers_d) */
+  870:  /*****************************************************************************
+  871:  ******************************************************************************
+  872:  * Private functions
+  873:  ******************************************************************************
+  874:  *****************************************************************************/
+  875:  
+  876:  static tmrStatus_t TMR_GetTimerStatus
+  877:  (
+  878:  tmrTimerID_t timerID
+  879:  )
+  880:  {
+  881:    return maTmrTimerStatusTable[timerID] & mTimerStatusMask_c;
+  0000 8c       [1]             CLRH  
+  0001 97       [1]             TAX   
+  0002 d60000   [4]             LDA   @maTmrTimerStatusTable,X
+  0005 a4e0     [2]             AND   #-32
+  882:  }
+  0007 8d       [7]             RTC   
+  883:  
+  884:  static void TMR_SetTimerStatus
+  885:  (
+  886:  tmrTimerID_t timerID, 
+  887:  tmrStatus_t status
+  888:  )
+  889:  {
+  0000 87       [2]             PSHA  
+  890:    maTmrTimerStatusTable[timerID] = (maTmrTimerStatusTable[timerID] & ~mTimerStatusMask_c) | status;
+  0001 8c       [1]             CLRH  
+  0002 d60000   [4]             LDA   @maTmrTimerStatusTable,X
+  0005 a41f     [2]             AND   #31
+  0007 9eea01   [4]             ORA   1,SP
+  000a d70000   [4]             STA   @maTmrTimerStatusTable,X
+  891:  }
+  000d 8a       [3]             PULH  
+  000e 8d       [7]             RTC   
+  892:  
+  893:  /*****************************************************************************/
+  894:  
+  895:  static tmrTimerType_t TMR_GetTimerType
+  896:  (
+  897:  tmrTimerID_t timerID
+  898:  )
+  899:  {
+  900:    return maTmrTimerStatusTable[timerID] & mTimerType_c;
+  0000 8c       [1]             CLRH  
+  0001 97       [1]             TAX   
+  0002 d60000   [4]             LDA   @maTmrTimerStatusTable,X
+  0005 a41f     [2]             AND   #31
+  901:  }
+  0007 8d       [7]             RTC   
+  902:  
+  903:  static void TMR_SetTimerType
+  904:  (
+  905:  tmrTimerID_t timerID, 
+  906:  tmrTimerType_t type
+  907:  )
+  908:  {
+  0000 87       [2]             PSHA  
+  909:    maTmrTimerStatusTable[timerID] = (maTmrTimerStatusTable[timerID] & ~mTimerType_c) | type;
+  0001 8c       [1]             CLRH  
+  0002 d60000   [4]             LDA   @maTmrTimerStatusTable,X
+  0005 a4e0     [2]             AND   #-32
+  0007 9eea01   [4]             ORA   1,SP
+  000a d70000   [4]             STA   @maTmrTimerStatusTable,X
+  910:  }
+  000d 8a       [3]             PULH  
+  000e 8d       [7]             RTC   
+  911:  
+  912:  

@@ -1,0 +1,585 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * Crt0.c
+    3:  *
+    4:  * This module contains the cold and warm-boot startup code, called by the MCU before 
+    5:  * calling main(). Sets up the stack, copies initialized data to RAM, etc...
+    6:  *
+    7:  * Note! Basic code is adapted (start08.c) from some code developed by Metrowerks.
+    8:  * Not used code has been deleted. Code has been cleaned up and rearranged.
+    9:  *
+   10:  *
+   11:  * Copyright (c) 2010, Freescale Semiconductor, Inc. All rights reserved.
+   12:  *
+   13:  *
+   14:  * No part of this document must be reproduced in any form - including copied,
+   15:  * transcribed, printed or by any electronic means - without specific written
+   16:  * permission from Freescale Semiconductor.
+   17:  *
+   18:  ************************************************************************************/
+   19:  
+   20:  
+   21:  /**********************************************************************/
+   22:  // Includes
+   23:  
+   24:  #include "EmbeddedTypes.h"
+   25:  #include "Crt0.h"
+   26:  #include "IoConfig.h"
+   27:  #include "NV_Data.h"
+   28:  #include "NV_FlashHAL.h"
+   29:  #include "NV_Flash.h"
+   30:  #include "IrqControlLib.h"
+   31:  #include "FunctionLib.h"
+   32:  
+   33:  #ifdef gUseBootloader_d
+   34:    #include "Bootloader.h"
+   35:  #endif
+   36:  
+   37:  /**********************************************************************/
+   38:  
+   39:  #pragma MESSAGE DISABLE C20001 // Warning C20001: Different value of stackpointer depending on control-flow
+   40:  #pragma MESSAGE DISABLE C4200  // Warning C4200: Other segment than in previous declaration
+   41:  
+   42:  /**********************************************************************/
+   43:  
+   44:  // Define the STARTUP data segement. Start code must be allocated to this segment.
+   45:  #pragma DATA_SEG FAR _STARTUP
+   46:  
+   47:  // Define a _startup_Data structure. The linker searches for the name "_startup_Data". The linker
+   48:  // initialize the structure and the structure is allocated in ROM
+   49:  
+   50:  // Store for init code stored in flash
+   51:  _startupData_t _startupData;
+   52:  
+   53:  
+   54:  unsigned char *pStack;
+   55:  
+   56:  // **************************************************************************
+   57:  
+   58:  #ifdef gUseBootloader_d
+   59:    
+   60:    #pragma CONST_SEG BOOT_FLAG
+   61:      const volatile uint8_t  bNewBootImageAvailable   = gBootValueForFALSE_c;
+   62:      const volatile uint8_t  bBootProcessCompleted    = gBootValueForTRUE_c;
+   63:    #pragma CONST_SEG DEFAULT
+   64:    
+   65:    #pragma CONST_SEG BOOTLOADER_DATA_ROM
+   66:      const volatile uint8_t bootValueForTRUE = gBootValueForTRUE_c;
+   67:      const volatile uint8_t boot_Version[2] 	= {0x01,0x00};
+   68:    #pragma CONST_SEG DEFAULT 
+   69:  #endif
+   70:  
+   71:  
+   72:  #pragma CONST_SEG NV_REGISTERS_SECTION // Section to store
+   73:  
+   74:  
+   75:  #if defined PROCESSOR_QE128
+   76:  const volatile NV_REG_t none_volatile_struct =
+   77:  {   // DO NOT CHANGE
+   78:      NV_FTRIM_VALUE,
+   79:      NV_TRIM_VALUE,
+   80:      NV_BACKKEY_VALUE,
+   81:      NV_RESERVED_VALUE,
+   82:      NV_PROT_VALUE,
+   83:      NV_RESERVED1_VALUE,
+   84:      NV_OPT_VALUE
+   85:  };
+   86:  #elif defined PROCESSOR_MC1323X
+   87:    const volatile NV_REG_t none_volatile_struct =
+   88:  {   // DO NOT CHANGE
+   89:  
+   90:      NV_BACKKEY_VALUE,
+   91:      NV_RESERVED_VALUE,
+   92:      NV_PROT_VALUE,
+   93:      NV_RESERVED1_VALUE,
+   94:      NV_OPT_VALUE
+   95:  };
+   96:  #else
+   97:  // HCS08 NV register struct with values.
+   98:  const volatile NV_REG_t none_volatile_struct =
+   99:  {   // DO NOT CHANGE
+  100:      NV_BACKKEY_VALUE,
+  101:      NV_RESERVED_VALUE,
+  102:      NV_PROT_VALUE,
+  103:      NV_ICG_TRIM_VALUE,
+  104:      NV_OPT_VALUE
+  105:  };
+  106:  #endif /* PROCESSOR_QE128 */
+  107:  
+  108:  #pragma CONST_SEG DEFAULT
+  109:  
+  110:  /**********************************************************************/
+  111:  
+  112:  // Local prototypes
+  113:  /* Place it in NON_BANKED memory */
+  114:  #ifdef MEMORY_MODEL_BANKED
+  115:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+  116:  #else
+  117:  #pragma CODE_SEG DEFAULT
+  118:  #endif /* MEMORY_MODEL_BANKED */
+  119:  static void Copy_Down(void);
+  120:  static void Finish(void);
+  121:  
+  122:  /**********************************************************************/
+  123:  // External prototypes
+  124:  
+  125:  extern void _COPY_L(void); // Function from RTSHC08.C.o (ansiis.lib)
+  126:  #pragma CODE_SEG DEFAULT
+  127:  
+  128:  extern char __SEG_START_SSTACK[];
+  129:  extern char __SEG_END_SSTACK[];
+  130:  
+  131:  extern void main_interface(void); // function in main.c
+  132:  
+  133:  /****************************************************************************************************/
+  134:  /* Function name:       loadByte()                                                                  */
+  135:  /* Description:                                                                                     */
+  136:  /* Input parameter:                                                                                 */
+  137:  /* Output parameter:                                                                                */
+  138:  /****************************************************************************************************/
+  139:  /* Place it in NON_BANKED memory */
+  140:  #ifdef MEMORY_MODEL_BANKED
+  141:      #pragma CODE_SEG __NEAR_SEG NON_BANKED
+  142:  #else
+  143:      #pragma CODE_SEG DEFAULT
+  144:  #endif /* MEMORY_MODEL_BANKED */
+  145:  
+  146:  static void near loadByte(void)
+  147:  {
+  148:  asm
+  149:  {
+  150:               PSHH
+  0000 8b       [2]             PSHH  
+  151:               PSHX
+  0001 89       [2]             PSHX  
+  152:  
+  153:               LDHX    5,SP
+  0002 9efe05   [5]             LDHX  5,SP
+  154:               LDA     0,X
+  0005 f6       [3]             LDA   ,X
+  155:               AIX     #1
+  0006 af01     [2]             AIX   #1
+  156:               STHX    5,SP
+  0008 9eff05   [5]             STHX  5,SP
+  157:               PULX
+  000b 88       [3]             PULX  
+  158:               PULH
+  000c 8a       [3]             PULH  
+  159:               RTS
+  000d 81       [6]             RTS   
+  160:  } // ASM end
+  161:  }
+  162:  
+  163:  /****************************************************************************************************/
+  164:  /* Function name:   Init()                                                                          */
+  165:  /* Description:         1) zero out RAM-areas where data is allocated                               */
+  166:  /*                      2) init run-time data                                                       */
+  167:  /*                      3) copy initialization data from ROM to RAM                                 */
+  168:  /* Input parameter:                                                                                 */
+  169:  /* Output parameter:                                                                                */
+  170:  /****************************************************************************************************/
+  171:  void Init(void)
+  172:  {
+  0000 a7fc     [2]             AIS   #-4
+  173:  int i;
+  174:  int *far p;
+  175:  
+  176:  asm
+  177:  {
+  178:  ZeroOut:     ;
+  179:               LDA    STARTUP_DATA.nofZeroOuts:1 ; nofZeroOuts
+  0002 c60007   [4]             LDA   _startupData:7
+  180:               INCA
+  0005 4c       [1]             INCA  
+  0006 95       [2]             TSX   
+  181:               STA    i:1                        ; i is counter for number of zero outs
+  0007 e701     [3]             STA   1,X
+  182:               LDA    STARTUP_DATA.nofZeroOuts:0 ; nofZeroOuts
+  0009 c60006   [4]             LDA   _startupData:6
+  183:               INCA
+  000c 4c       [1]             INCA  
+  184:               STA    i:0
+  000d f7       [2]             STA   ,X
+  185:               LDHX   STARTUP_DATA.pZeroOut      ; *pZeroOut
+  000e 320008   [5]             LDHX  _startupData:8
+  186:               BRA    Zero_5
+  0011 201f     [3]             BRA   L32 ;abs = 0032
+  0013          L13:    
+  187:  Zero_3:    ;
+  188:              ; CLR    i:1 is already 0
+  189:  Zero_4:    ;
+  190:               ; { HX == _pZeroOut }
+  191:               PSHX
+  0013 89       [2]             PSHX  
+  192:               PSHH
+  0014 8b       [2]             PSHH  
+  193:               ; { nof bytes in (int)2,X }
+  194:               ; { address in (int)0,X   }
+  195:               LDA    0,X
+  0015 f6       [3]             LDA   ,X
+  196:               PSHA
+  0016 87       [2]             PSHA  
+  197:               LDA    2,X
+  0017 e602     [3]             LDA   2,X
+  198:               INCA
+  0019 4c       [1]             INCA  
+  199:               STA    p                  ; p:0 is used for high byte of byte counter
+  001a 9ee706   [4]             STA   6,SP
+  200:               LDA    3,X
+  001d e603     [3]             LDA   3,X
+  201:               LDX    1,X
+  001f ee01     [3]             LDX   1,X
+  202:               PULH
+  0021 8a       [3]             PULH  
+  203:               INCA
+  0022 4c       [1]             INCA  
+  204:               BRA    Zero_0
+  0023 2003     [3]             BRA   L28 ;abs = 0028
+  0025          L25:    
+  205:  Zero_1:    ;
+  206:             ;  CLRA   A is already 0, so we do not have to clear it
+  207:  Zero_2:    ;
+  208:               CLR    0,X
+  0025 7f       [4]             CLR   ,X
+  209:               AIX    #1
+  0026 af01     [2]             AIX   #1
+  0028          L28:    
+  210:  Zero_0:    ;
+  211:               DBNZA  Zero_2
+  0028 4bfb     [4]             DBNZA L25 ;abs = 0025
+  212:  Zero_6:
+  213:               DBNZ   p, Zero_1
+  002a 9e6b05f7 [8]             DBNZ  5,SP,L25 ;abs = 0025
+  214:               PULH
+  002e 8a       [3]             PULH  
+  215:               PULX                           ; restore *pZeroOut
+  002f 88       [3]             PULX  
+  216:               AIX    #4                      ; advance *pZeroOut
+  0030 af04     [2]             AIX   #4
+  0032          L32:    
+  217:  Zero_5:    ;
+  218:               DBNZ   i:1, Zero_4
+  0032 9e6b02dd [8]             DBNZ  2,SP,L13 ;abs = 0013
+  219:               DBNZ   i:0, Zero_3
+  0036 9e6b01d9 [8]             DBNZ  1,SP,L13 ;abs = 0013
+  220:               ;
+  221:  CopyDown:    JSR    Copy_Down;
+  003a cd0000   [6]             JSR   Copy_Down
+  222:  
+  223:  } // ASM end
+  224:  }
+  003d a704     [2]             AIS   #4
+  003f 81       [6]             RTS   
+  225:  
+  226:  /****************************************************************************************************/
+  227:  /* Function name:   Copy_Down()                                                                     */
+  228:  /* Description:     _startupData.toCopyDownBeg  --->                                                */
+  229:  /*                  {nof(16) dstAddr(16) {bytes(8)}^nof} Zero(16)                                   */
+  230:  /* Input parameter: None                                                                            */
+  231:  /* Output parameter:    None                                                                        */
+  232:  /* Error handling:      None                                                                        */
+  233:  /****************************************************************************************************/
+  234:  
+  235:  static void Copy_Down(void)
+  236:  {
+  0000 a7fe     [2]             AIS   #-2
+  237:  int i;
+  238:  
+  239:  asm
+  240:  {
+  241:               LDHX   STARTUP_DATA.toCopyDownBeg:toCopyDownBegOffs
+  0002 32000a   [5]             LDHX  _startupData:10
+  242:               PSHX
+  0005 89       [2]             PSHX  
+  243:               PSHH
+  0006 8b       [2]             PSHH  
+  0007          L7:     
+  244:  Loop0:
+  245:               JSR    loadByte  ; load high byte counter
+  0007 cd0000   [6]             JSR   loadByte
+  246:               TAX              ; save for compare
+  000a 97       [1]             TAX   
+  247:               INCA
+  000b 4c       [1]             INCA  
+  248:               STA    i
+  000c 9ee703   [4]             STA   3,SP
+  249:               JSR    loadByte  ; load low byte counter
+  000f cd0000   [6]             JSR   loadByte
+  250:               INCA
+  0012 4c       [1]             INCA  
+  251:               STA    i:1
+  0013 9ee704   [4]             STA   4,SP
+  252:               DECA
+  0016 4a       [1]             DECA  
+  253:               BNE    notfinished
+  0017 2603     [3]             BNE   L1C ;abs = 001c
+  254:               CBEQX  #0, finished
+  0019 51001b   [4]             CBEQX #0,L37 ;abs = 0037
+  001c          L1C:    
+  255:  notfinished:
+  256:  
+  257:               JSR    loadByte  ; load high byte ptr
+  001c cd0000   [6]             JSR   loadByte
+  258:               PSHA
+  001f 87       [2]             PSHA  
+  259:               PULH
+  0020 8a       [3]             PULH  
+  260:               JSR    loadByte  ; load low byte ptr
+  0021 cd0000   [6]             JSR   loadByte
+  261:               TAX              ; HX is now destination pointer
+  0024 97       [1]             TAX   
+  262:               BRA    Loop1
+  0025 2006     [3]             BRA   L2D ;abs = 002d
+  0027          L27:    
+  263:  Loop3:
+  264:  Loop2:
+  265:               JSR    loadByte  ; load data byte
+  0027 cd0000   [6]             JSR   loadByte
+  266:               STA    0,X
+  002a f7       [2]             STA   ,X
+  267:               AIX    #1
+  002b af01     [2]             AIX   #1
+  002d          L2D:    
+  268:  Loop1:
+  269:               DBNZ   i:1, Loop2
+  002d 9e6b04f6 [8]             DBNZ  4,SP,L27 ;abs = 0027
+  270:               DBNZ   i:0, Loop3
+  0031 9e6b03f2 [8]             DBNZ  3,SP,L27 ;abs = 0027
+  271:               BRA    Loop0
+  0035 20d0     [3]             BRA   L7 ;abs = 0007
+  0037          L37:    
+  272:  
+  273:  finished:
+  274:               AIS #2
+  0037 a702     [2]             AIS   #2
+  275:  
+  276:               JSR    Finish;
+  0039 cd0000   [6]             JSR   Finish
+  277:  
+  278:  } // ASM end
+  279:  }
+  003c a702     [2]             AIS   #2
+  003e 81       [6]             RTS   
+  280:  
+  281:  /****************************************************************************************************/
+  282:  /* Function name:   Finish()                                                                        */
+  283:  /* Description:     optimized asm version. Some bytes (ca 3) larger than C version                  */
+  284:  /*                  (when considering the runtime routine too), but about 4 times                   */
+  285:  /*                  faster.                                                                         */
+  286:  /* Input parameter: None                                                                            */
+  287:  /* Output parameter:    None                                                                        */
+  288:  /* Error handling:      None                                                                        */
+  289:  /****************************************************************************************************/
+  290:  
+  291:  static void Finish(void)
+  292:  {
+  293:  asm
+  294:  {
+  295:               LDHX   STARTUP_DATA.toCopyDownBeg:toCopyDownBegOffs
+  0000 32000a   [5]             LDHX  _startupData:10
+  0003          L3:     
+  296:  next:
+  297:               LDA   0,X    ; list is terminated by 2 zero bytes
+  0003 f6       [3]             LDA   ,X
+  298:               ORA   1,X
+  0004 ea01     [3]             ORA   1,X
+  299:               BEQ copydone
+  0006 2722     [3]             BEQ   L2A ;abs = 002a
+  300:               PSHX         ; store current position
+  0008 89       [2]             PSHX  
+  301:               PSHH
+  0009 8b       [2]             PSHH  
+  302:               LDA   3,X    ; psh dest low
+  000a e603     [3]             LDA   3,X
+  303:               PSHA
+  000c 87       [2]             PSHA  
+  304:               LDA   2,X    ; psh dest high
+  000d e602     [3]             LDA   2,X
+  305:               PSHA
+  000f 87       [2]             PSHA  
+  306:               LDA   1,X    ; psh cnt low
+  0010 e601     [3]             LDA   1,X
+  307:               PSHA
+  0012 87       [2]             PSHA  
+  308:               LDA   0,X    ; psh cnt high
+  0013 f6       [3]             LDA   ,X
+  309:               PSHA
+  0014 87       [2]             PSHA  
+  310:               AIX   #4
+  0015 af04     [2]             AIX   #4
+  311:               JSR  _COPY_L ; copy one block
+  0017 cd0000   [6]             JSR   _COPY_L
+  312:               PULH
+  001a 8a       [3]             PULH  
+  313:               PULX
+  001b 88       [3]             PULX  
+  314:               TXA
+  001c 9f       [1]             TXA   
+  315:               ADD   1,X    ; add low
+  001d eb01     [3]             ADD   1,X
+  316:               PSHA
+  001f 87       [2]             PSHA  
+  317:               PSHH
+  0020 8b       [2]             PSHH  
+  318:               PULA
+  0021 86       [3]             PULA  
+  319:               ADC   0,X    ; add high
+  0022 f9       [3]             ADC   ,X
+  320:               PSHA
+  0023 87       [2]             PSHA  
+  321:               PULH
+  0024 8a       [3]             PULH  
+  322:               PULX
+  0025 88       [3]             PULX  
+  323:               AIX   #4
+  0026 af04     [2]             AIX   #4
+  324:               BRA next
+  0028 20d9     [3]             BRA   L3 ;abs = 0003
+  002a          L2A:    
+  325:  copydone:
+  326:  
+  327:  } // ASM end
+  328:  }
+  002a 81       [6]             RTS   
+  329:  
+  330:  #ifdef gUseBootloader_d
+  331:    #pragma CODE_SEG __NEAR_SEG APP_STARTUP_FUNCTION
+  332:  #else  
+  333:    #pragma CODE_SEG DEFAULT
+  334:  #endif /* gUseBootloader_d */
+  335:    /* Place it in NON_BANKED memory */
+  336:    #ifdef MEMORY_MODEL_BANKED
+  337:      #pragma CODE_SEG __NEAR_SEG NON_BANKED
+  338:    #else
+  339:      #pragma CODE_SEG DEFAULT
+  340:    #endif /* MEMORY_MODEL_BANKED */
+  341:  
+  342:    
+  343:  
+  344:  /****************************************************************************************************/
+  345:  /* Function name:   _Startup()                                                                      */
+  346:  /* Description:     Entry point for the SW. DO NOT CHANGE FUNCTION NAME.                            */
+  347:  /*                  It will initialize the stack and the ZI and RW memory.                          */
+  348:  /* Input parameter: None                                                                            */
+  349:  /* Output parameter:None                                                                            */
+  350:  /* Error handling:  None                                                                            */
+  351:  /****************************************************************************************************/
+  352:  void _Startup(void)
+  353:  {
+  354:    /* Note that the stack pointer may not be initialized yet, so this function */
+  355:    /* cannot have any local data. */
+  356:  
+  357:    // Disable interrupts. Only needed for warm restarts. The HCS08 comes out of
+  358:    // reset with interupts disabled.
+  359:    IrqControlLib_DisableAllIrqs();
+  0000 9b       [1]             SEI   
+  360:  
+  361:    // Setup SIM options
+  362:    SIMOPT  = SYSTEMS_OPTION_REG_VALUE;
+  0001 a623     [2]             LDA   #35
+  0003 c71802   [4]             STA   6146
+  363:   #if defined (PROCESSOR_MC1323X)
+  364:    SIMOPT2 = SYSTEMS_OPTION2_REG_VALUE;
+  0006 4f       [1]             CLRA  
+  0007 c71803   [4]             STA   6147
+  365:   #endif
+  366:  
+  367:    // Setup stack
+  368:    if ( !( _startupData.flags & STARTUP_FLAGS_NOT_INIT_SP )) 
+  000a c60000   [4]             LDA   _startupData
+  000d a502     [2]             BIT   #2
+  000f 2619     [3]             BNE   L2A ;abs = 002a
+  369:      {
+  370:   #if (STACK_FILL)
+  371:  	    // Initialize the stack
+  372:  	    pStack = __SEG_START_SSTACK;
+  0011 450000   [3]             LDHX  @__SEG_START_SSTACK
+  373:  	    while ( pStack < __SEG_END_SSTACK )
+  0014 2008     [3]             BRA   L1E ;abs = 001e
+  0016          L16:    
+  374:  	    {
+  375:  	      *pStack++ = STACK_INIT_VALUE;
+  0016 a655     [2]             LDA   #85
+  0018 320000   [5]             LDHX  pStack
+  001b f7       [2]             STA   ,X
+  001c af01     [2]             AIX   #1
+  001e          L1E:    
+  001e 960000   [5]             STHX  pStack
+  0021 650000   [3]             CPHX  @__SEG_END_SSTACK
+  0024 25f0     [3]             BCS   L16 ;abs = 0016
+  376:  	    }
+  377:   #endif	    
+  378:      // Initialize the stack pointer */
+  379:      __asm LDHX @__SEG_END_SSTACK;
+  0026 450000   [3]             LDHX  @__SEG_END_SSTACK
+  380:      __asm TXS;
+  0029 94       [2]             TXS   
+  002a          L2A:    
+  381:        }    
+  382:    
+  383:    #ifdef PROCESSOR_HCS08
+  384:    // Change default SCM (mode 2) bus frequency from ~4 MHz to ~8 MHz
+  385:    // SCM is only temporary until Abel is ready. No precise frequency is required.
+  386:    // Note! FLL is bypassed in SCM mode.
+  387:  
+  388:    // Store ICG filter values to change bus frequency for self clock mode
+  389:    // Filter values are copied from NV RAM - Search for valid NV RAM
+  390:  
+  391:    // Check NV RAM section 0
+  392:  
+  393:     ICGFLTL = gHardwareParameters.NV_ICGFLTL;
+  394:     ICGFLTH = gHardwareParameters.NV_ICGFLTU;
+  395:     
+  396:    // A few nops for clock to settle.
+  397:     __asm nop
+  398:     __asm nop
+  399:     __asm nop
+  400:     __asm nop
+  401:    #endif   
+  402:  
+  403:    CALL_MAIN_INTERFACE
+  002a cd0000   [6]             JSR   Init
+  002d ac000000 [8]             CALL  RST_GetResetStatus
+  0031 ac000000 [8]             CALL  main
+  404:  }
+  0035 81       [6]             RTS   
+  405:  #pragma CODE_SEG DEFAULT
+  406:  
+  407:  #ifdef gUseBootloader_d
+  408:  #pragma CODE_SEG __NEAR_SEG BOOTLOADER_CODE_ROM
+  409:  void _BootEntryPoint(void)
+  410:  {
+  411:     // Disable interrupts. Only needed for warm restarts. The HCS08 comes out of
+  412:    // reset with interupts disabled.
+  413:    IrqControlLib_DisableAllIrqs();
+  414:    
+  415:    /* Check if there is no boot image available in the external EEPROM and if eventually
+  416:    the booting of the previous one has been completed. If both conditions are met, start
+  417:    running the application in the internal Flash. Else, start the process of booting from
+  418:    external EEPROM */   
+  419:    if((bNewBootImageAvailable != bootValueForTRUE) && (bBootProcessCompleted == bootValueForTRUE))
+  420:    {
+  421:      __asm jmp _Startup;  
+  422:    }
+  423:  
+  424:    // Initialize the stack pointer */
+  425:    __asm LDHX @__SEG_END_SSTACK;
+  426:    __asm TXS;
+  427:    
+  428:    // Setup SIM options
+  429:    SIMOPT  = SYSTEMS_OPTION_REG_VALUE;
+  430:   
+  431:    #if defined (PROCESSOR_MC1323X)
+  432:      SIMOPT2 = SYSTEMS_OPTION2_REG_VALUE;
+  433:    #endif
+  434:    
+  435:    /* This function will never exit */
+  436:    Boot_LoadImage();
+  437:  }
+  438:  #endif
+  439:  
+  440:  
+  441:  // **************************************************************************
+  442:  

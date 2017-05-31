@@ -1,0 +1,171 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /******************************************************************************
+    2:  * ZTC message type table definitions and related code.
+    3:  *
+    4:  * Copyright (c) 2008, Freescale, Inc.  All rights reserved.
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from  Freescale Semiconductor.
+   10:  *
+   11:  ******************************************************************************/
+   12:  
+   13:  /* Define the tables that describe the Ztc-relevant properties associated
+   14:   * with the various Message Ids, and the utility functions used to find
+   15:   * things in those tables.
+   16:   *
+   17:   * There is one table per SAP Handler; eachtable contains information about
+   18:   * all of the Message Ids recognized by that SAP Handler.
+   19:   *
+   20:   * All Message Id infomation (well, almost all) is actually collected in
+   21:   * ZtcMsgTypeInfoTbl.h, with the information about a given Message Id on a
+   22:   * single line, within a macro. This file defines those macros to select
+   23:   * the desired part of the Message Id information, and then #include's
+   24:   * the tbl file.
+   25:   *
+   26:   * The tables here are never directly accesed by their names. The SAP Handler
+   27:   * info table contains a pointer to the appropriate Message Id information
+   28:   * table for each SAP Handler.
+   29:   */
+   30:  
+   31:  #include "EmbeddedTypes.h"
+   32:  
+   33:  #include "ZtcInterface.h"
+   34:  
+   35:  #if gZtcIncluded_d
+   36:  
+   37:  #include "AppAspInterface.h"
+   38:  #include "ZtcSAPHandlerInfo.h"
+   39:  #include "AspZtc.h"
+   40:  
+   41:  #include "ZtcPrivate.h"
+   42:  #include "ZtcClientCommunication.h"
+   43:  #include "ZtcMsgTypeInfo.h"
+   44:  #include "ZtcCopyData.h"
+   45:  
+   46:  /******************************************************************************
+   47:  *******************************************************************************
+   48:  * Public memory definitions
+   49:  *******************************************************************************
+   50:  ******************************************************************************/
+   51:  
+   52:  /* Note that for each table, there is also a table length index_t. The code
+   53:   * needs some way to know how many rows are in each table, so the main SAP
+   54:   * Handler table contains a pointer to this length variable. This costs
+   55:   * one index_t for the length variable plus one (index_t *) for the pointer
+   56:   * to it, per SAP Handler. Fortunately, there aren't very many SAP Handlers.
+   57:   *
+   58:   * There are other ways to make the lengths of the message info tables
+   59:   * available for use in the SAP Handler table that would not require the
+   60:   * pointers, but they involve some C language and/or pre-processor tricks
+   61:   * that are not obvious, and may not work in all compilers.
+   62:   */
+   63:  
+   64:  /* opcode group 0x87, NWK_MCPS_SapHandler() */
+   65:  #if gSAPMessagesEnableMcps_d
+   66:  #define NwkMcpsTbl(msgType, cnfType, flags, len, format) \
+   67:      {msgType, cnfType, len, (flags | format)},
+   68:  ztcMsgTypeInfo_t const gaZtcNwkMcpsMsgTypeTable[] = {
+   69:  #include "ZtcMsgTypeInfoTbl.h"
+   70:  };
+   71:  index_t const gZtcNwkMcpsMsgTypeTableLen = NumberOfElements(gaZtcNwkMcpsMsgTypeTable);
+   72:  #endif
+   73:  
+   74:  /* opcode group 0x86, MCPS_NWK_SapHandler() */
+   75:  #if gSAPMessagesEnableMcps_d
+   76:  #define McpsNwkTbl(msgType, cnfType, flags, len, format) \
+   77:      {msgType, cnfType, len, (flags | format)},
+   78:  ztcMsgTypeInfo_t const gaZtcMcpsNwkMsgTypeTable[] = {
+   79:  #include "ZtcMsgTypeInfoTbl.h"
+   80:  };
+   81:  index_t const gZtcMcpsNwkMsgTypeTableLen = NumberOfElements(gaZtcMcpsNwkMsgTypeTable);
+   82:  #endif
+   83:  
+   84:  /* opcode group_c = 0x85, NWK_MLME_SapHandler() */
+   85:  #if gSAPMessagesEnableMlme_d
+   86:  #define NwkMlmeTbl(msgType, cnfType, flags, len, format) \
+   87:      {msgType, cnfType, len, (flags | format)},
+   88:  ztcMsgTypeInfo_t const gaZtcNwkMlmeMsgTypeTable[] = {
+   89:  #include "ZtcMsgTypeInfoTbl.h"
+   90:  };
+   91:  index_t const gZtcNwkMlmeMsgTypeTableLen = NumberOfElements(gaZtcNwkMlmeMsgTypeTable);
+   92:  #endif
+   93:  
+   94:  /* opcode group 0x84, MLME_NWK_SapHandler() */
+   95:  #if gSAPMessagesEnableMlme_d
+   96:  #define MlmeNwkTbl(msgType, cnfType, flags, len, format) \
+   97:      {msgType, cnfType, len, (flags | format)},
+   98:  ztcMsgTypeInfo_t const gaZtcMlmeNwkMsgTypeTable[] = {
+   99:  #include "ZtcMsgTypeInfoTbl.h"
+  100:  };
+  101:  index_t const gZtcMlmeNwkMsgTypeTableLen = NumberOfElements(gaZtcMlmeNwkMsgTypeTable);
+  102:  #endif
+  103:  
+  104:  /* opcode group_c = 0x95, APP_ASP_SapHandler() */
+  105:  #if gSAPMessagesEnableAsp_d
+  106:  #define NwkAspTbl(msgType, cnfType, flags, len, format) \
+  107:      {msgType, cnfType, len, (flags | format)},
+  108:  ztcMsgTypeInfo_t const gaZtcNwkAspMsgTypeTable[] = {
+  109:  #include "ZtcMsgTypeInfoTbl.h"
+  110:  };
+  111:  index_t const gZtcNwkAspMsgTypeTableLen = NumberOfElements(gaZtcNwkAspMsgTypeTable);
+  112:  #endif
+  113:  
+  114:  /* opcode group 0x94, ASP_APP_SapHandler() */
+  115:  #if gSAPMessagesEnableAsp_d
+  116:  #define AspNwkTbl(msgType, cnfType, flags, len, format) \
+  117:      {msgType, cnfType, len, (flags | format)},
+  118:  ztcMsgTypeInfo_t const gaZtcAspNwkMsgTypeTable[] = {
+  119:  #include "ZtcMsgTypeInfoTbl.h"
+  120:  };
+  121:  index_t const gZtcAspNwkMsgTypeTableLen = NumberOfElements(gaZtcAspNwkMsgTypeTable);
+  122:  #endif
+  123:  
+  124:  
+  125:  /* Ztc handles all requests internally, and needs less information about
+  126:   * message types than the SAP Handlers need.
+  127:   */
+  128:  #define ZtcMsgTbl(msgType, configFunc) \
+  129:    {msgType, configFunc},
+  130:  ztcInternalMsgTypeInfo_t const gaZtcInternalMsgTypeInfoTable[] = {
+  131:  #include "ZtcMsgTypeInfoTbl.h"
+  132:  };
+  133:  index_t const gZtcInternalMsgTypeInfoTableLen = NumberOfElements(gaZtcInternalMsgTypeInfoTable);
+  134:  
+  135:  /******************************************************************************
+  136:  *******************************************************************************
+  137:  * Private memory declarations
+  138:  *******************************************************************************
+  139:  ******************************************************************************/
+  140:  
+  141:  /******************************************************************************
+  142:  *******************************************************************************
+  143:  * Public functions
+  144:  *******************************************************************************
+  145:  ******************************************************************************/
+  146:  
+  147:  /* Given a pointer to a message info table and a message type, return a */
+  148:  /* pointer to the entry describing the message type. */
+  149:  ztcMsgTypeInfo_t const *pZtcMsgTypeInfoFromMsgType
+  150:    (
+  151:    ztcMsgTypeInfo_t const *pMsgTypeTable,
+  152:    index_t const msgTypeInfoLen,
+  153:    ztcMsgType_t const msgType
+  154:    )
+  155:  {
+  156:    index_t i;
+  157:  
+  158:    for (i = 0; i < msgTypeInfoLen; ++i) {
+  159:      if (pMsgTypeTable[i].msgType == msgType) {
+  160:        return &(pMsgTypeTable[i]);
+  161:      }
+  162:    }
+  163:  
+  164:    return NULL;
+  165:  }                                       /* pZtcPtrToMsgTypeInfo() */
+  166:  
+  167:  #endif                                  /* #if gZtcIncluded_d == 1 */
+  168:  

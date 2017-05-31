@@ -27,7 +27,6 @@
 #include "NV_Data.h"       /* Defines the interface of the Keyboard Module. */
 
 
-
 /************************************************************************************
 *************************************************************************************
 * Public macros
@@ -60,11 +59,12 @@ enum {
   stateAssociate,
   stateAssociateWaitConfirm,
   stateListen,
-  Rooter_stateScanEdStart,
-  Rooter_stateScanEdWaitConfirm,
-  Rooter_stateStartCoordinator,
-  Rooter_stateStartCoordinatorWaitConfirm,
-  Rooter_stateListen
+  stateInitRooter,
+  stateScanEdStart,
+  stateScanEdWaitConfirm,
+  stateStartRooter,
+  stateStartRooterWaitConfirm,
+  stateRooterListen
 };
 
 
@@ -76,7 +76,7 @@ enum {
 #define gAppEvtRxFromUart_c            (1 << 1)
 #define gAppEvtMessageFromMLME_c       (1 << 2)
 #define gAppEvtMessageFromMCPS_c       (1 << 3)
-
+#define gAppEvtStartCoordinator_c      (1 << 4)
 #define gAppEvt_FromMPL3115A2_c        (1 << 7) // New for Freescale sensor board
 #define gAppEvt_FromMMA8652_c          (1 << 9) // New
 #define gAppEvt_FromMAG3110_c          (1 << 10)// New

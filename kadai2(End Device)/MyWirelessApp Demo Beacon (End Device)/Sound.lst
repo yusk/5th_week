@@ -1,0 +1,62 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * Sound.c
+    3:  *
+    4:  * Sound driver. Includes only buzzer support for now.
+    5:  *
+    6:  * Copyright (c) 2006, Freescale, Inc.  All rights reserved.
+    7:  *
+    8:  *
+    9:  * No part of this document must be reproduced in any form - including copied,
+   10:  * transcribed, printed or by any electronic means - without specific written
+   11:  * permission from Freescale Semiconductor.
+   12:  *
+   13:  ************************************************************************************/
+   14:  #include "TMR_Interface.h"
+   15:  #include "IoConfig.h"
+   16:  #include "AppToPlatformConfig.h"
+   17:  #include "Sound.h"
+   18:  
+   19:  #if (gHaveBuzzer_c)
+   20:  tmrTimerID_t mSoundTimerID;
+   21:  
+   22:  
+   23:  /*****************************************************************************
+   24:  * BuzzerTimerCallBack
+   25:  *
+   26:  * Handle buzzer timer. Turn off when done.
+   27:  *****************************************************************************/
+   28:  void BuzzerTimerCallBack
+   29:    (
+   30:    tmrTimerID_t timerID
+   31:    )
+   32:  {
+   33:    (void)timerID;
+   34:    BuzzerOff();
+   35:  }
+   36:  
+   37:  /*****************************************************************************
+   38:  * BuzzerBeep
+   39:  *
+   40:  * Create short beep (1/4 second). Requies a timer
+   41:  *
+   42:  *****************************************************************************/
+   43:  void BuzzerBeep
+   44:    (
+   45:    void
+   46:    )
+   47:  {
+   48:    /* allocate a timer if not one already */
+   49:    if(!mSoundTimerID)
+   50:      mSoundTimerID = TMR_AllocateTimer();
+   51:  
+   52:    /* start clicking buzzer */
+   53:    TMR_StartSingleShotTimer(mSoundTimerID, 250, BuzzerTimerCallBack);
+   54:    BuzzerOn();
+   55:  }
+   56:  
+   57:  #endif /* gHaveBuzzer_c */
+   58:  
+   59:  

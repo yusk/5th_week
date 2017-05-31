@@ -1,0 +1,38 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * This module contains the dummy ISR function
+    3:  * 
+    4:  *
+    5:  *
+    6:  * (c) Copyright 2006, Freescale, Inc. All rights reserved.
+    7:  *
+    8:  *
+    9:  * No part of this document must be reproduced in any form - including copied,
+   10:  * transcribed, printed or by any electronic means - without specific written
+   11:  * permission from Freescale Semiconductor.
+   12:  ************************************************************************************/
+   13:  
+   14:  #include "IrqControlLib.h"
+   15:  #include "EmbeddedTypes.h"
+   16:  
+   17:  // **************************************************************************
+   18:  /* Place it in NON_BANKED memory */
+   19:  #ifdef MEMORY_MODEL_BANKED
+   20:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+   21:  #else
+   22:  #pragma CODE_SEG DEFAULT
+   23:  #endif /* MEMORY_MODEL_BANKED */
+   24:  INTERRUPT_KEYWORD void Default_Dummy_ISR(void)
+   25:  {
+  0000 8b       [2]             PSHH  
+   26:     // Unimplemented ISRs trap.
+   27:     asm BGND;
+  0001 82       [5]             BGND  
+   28:  }
+  0002 8a       [3]             PULH  
+  0003 80       [9]             RTI   
+   29:  #pragma CODE_SEG DEFAULT
+   30:  // **************************************************************************
+   31:  

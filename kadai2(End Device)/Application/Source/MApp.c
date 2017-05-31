@@ -13,6 +13,7 @@
 #include "MApp.h"
 #include "Sound.h"
 #include "NVM_Interface.h"
+#include "CMT_interface.h"
 #include "IIC_Interface.h" // New
 //#include "IoConfig.h"
 
@@ -68,6 +69,10 @@ static void Router_TransmitUartData(void);
 static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg);
 static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn);
 
+/* added by j */
+static uint8_t App_StartRooter(void);
+static void App_HandleScanEdConfirm(nwkMessage_t *pMsg);
+
 volatile static uint8_t global_counter;
 
 static void count_timer(uint8_t timerId){
@@ -85,12 +90,37 @@ static void count_timer(uint8_t timerId){
 //Default Pan ID
 static const uint8_t coordinaterPanId[2] = { (mDefaultValueOfPanId_c & 0xff), (mDefaultValueOfPanId_c >> 8)};
 
+/* The current logical channel (frequency band) */
+static uint8_t mLogicalChannel;
+
 
 /************************************************************************************
 *************************************************************************************
 * Private memory declarations
 *************************************************************************************
 ************************************************************************************/
+
+/* The short address and PAN ID of the coordinator*/
+static const uint8_t maShortAddress[2] = { (mDefaultValueOfShortAddress_c & 0xff), (mDefaultValueOfShortAddress_c >> 8)};
+static const uint8_t maPanId[2] = { (mDefaultValueOfPanId_c & 0xff), (mDefaultValueOfPanId_c >> 8)};
+
+/* The current logical channel (frequency band) */
+static uint8_t mLogicalChannel;
+
+/* These byte arrays stores an associated
+   devices long and short addresses. */
+static uint8_t maDeviceShortAddress[2];
+static uint8_t maDeviceLongAddress[8];
+
+/* Data request packet for sending UART input to the coordinator */
+static nwkToMcpsMessage_t *mpPacket;
+
+/* The MSDU handle is a unique data packet identifier */
+static uint8_t mMsduHandle;
+
+/* Number of pending data packets */
+static uint8_t mcPendingPackets;
+
 
 /* Information about the PAN we are part of */
 static panDescriptor_t mCoordInfo;
@@ -375,7 +405,7 @@ void AppTask(event_t events)
             	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
               }else if(maMyAddress[1]==0x02){
             	  UartUtil_Print("\n\rSwitch Role to End-Device\n\r", gAllowToBlock_d);
-            	  gState = Rooter_stateStartCoordinator;
+            	  gState = stateStartRooter;
             	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
               }
 //********************************************************
@@ -383,9 +413,9 @@ void AppTask(event_t events)
           else 
           {
           
-          UartUtil_Print("\n\rAssociate Confirm wasn't successful... \n\r\n\r", gAllowToBlock_d);
-          gState = stateScanActiveStart;
-          TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+        	  UartUtil_Print("\n\rAssociate Confirm wasn't successful... \n\r\n\r", gAllowToBlock_d);
+        	  gState = stateInitRooter;
+        	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
           }
         }
       }
@@ -399,7 +429,7 @@ void AppTask(event_t events)
       if (pMsgIn)
       {  
         /* Process it */
-        rc = APP_HandleMlmeInput(pMsgIn);
+        rc = App_HandleMlmeInput(pMsgIn);
       }
     } 
     
@@ -435,8 +465,51 @@ void AppTask(event_t events)
 #endif
     
     break;
+    
+  case stateInitRooter:
+     /* Print a welcome message to the UART */
+    UartUtil_Print(" MyWirelessApp Demo Beacon Coordinator application is initialized and ready.\n\r\n\r", gAllowToBlock_d);            
+    /* Goto Energy Detection state. */
+    gState = stateScanEdStart;
+    TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);    
+    break;
+    
+  case stateScanEdStart:
+      /* Start the Energy Detection scan, and goto wait for confirm state. */
+      UartUtil_Print("Initiating the Energy Detection Scan\n\r", gAllowToBlock_d);
+      /*Print the message on the LCD also*/
+      LCD_ClearDisplay();
+      LCD_WriteString(1,"Starting Energy");
+      LCD_WriteString(2,"Detection Scan");      
+      rc = App_StartScan(gScanModeED_c);
+      if(rc == errorNoError)
+      {
+        gState = stateScanEdWaitConfirm;
+      }
+      break;
+      
+  case stateScanEdWaitConfirm:
+      /* Stay in this state until the MLME Scan confirm message arrives,
+         and has been processed. Then goto Start Coordinator state. */
+      if (events & gAppEvtMessageFromMLME_c)
+      {
+        if (pMsgIn)
+        {
+          rc = App_WaitMsg(pMsgIn, gNwkScanCnf_c);
+          if(rc == errorNoError)
+          {
+            /* Process the ED scan confirm. The logical
+               channel is selected by this function. */
+            App_HandleScanEdConfirm(pMsgIn);
+            /* Go to the Start Coordinator state */
+            gState = stateStartRooter;
+            TS_SendEvent(gAppTaskID_c, gAppEvtStartCoordinator_c);
+          }
+        }
+      }
+      break;
   
-  case Rooter_stateStartCoordinator:
+  case stateStartRooter:
     if (events & gAppEvtStartCoordinator_c)
     {
       /* Start up as a PAN Coordinator on the selected channel. */
@@ -447,25 +520,25 @@ void AppTask(event_t events)
       LCD_ClearDisplay();
       LCD_WriteString(1,"Starting");
       LCD_WriteString(2,"PAN Rooter");
-      ret = App_StartRooter();
-      if(ret == errorNoError)
+      rc = App_StartRooter();
+      if(rc == errorNoError)
       {
         /* If the Start request was sent successfully to
            the MLME, then goto Wait for confirm state. */
-        gState = Rooter_stateStartCoordinatorWaitConfirm;
+        gState = stateStartRooterWaitConfirm;
       }
     }
     break; 
     
-  case Rooter_stateStartCoordinatorWaitConfirm:
+  case stateStartRooterWaitConfirm:
     /* Stay in this state until the Start confirm message
        arrives, and then goto the Listen state. */
     if (events & gAppEvtMessageFromMLME_c)
     {
       if (pMsgIn)
       {    
-        ret = App_WaitMsg(pMsgIn, gNwkStartCnf_c);
-        if(ret == errorNoError)
+        rc = App_WaitMsg(pMsgIn, gNwkStartCnf_c);
+        if(rc == errorNoError)
         {
           UartUtil_Print("Started the Rooter with PAN ID 0x", gAllowToBlock_d);
           UartUtil_PrintHex((uint8_t *)maPanId, 2, 0);
@@ -476,7 +549,7 @@ void AppTask(event_t events)
           LCD_ClearDisplay();
           LCD_WriteString(1,"Ready to send");
           LCD_WriteString(2,"and receive data");
-          gState = Rooter_stateListen;
+          gState = stateRooterListen;
           TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
         }
       }
@@ -484,7 +557,7 @@ void AppTask(event_t events)
     break; 
     
   /* added by yusk */
-  case Rooter_stateListen:
+  case stateRooterListen:
     /* Stay in this state forever. 
        Transmit the data received on UART */
     if (events & gAppEvtMessageFromMLME_c)
@@ -493,7 +566,7 @@ void AppTask(event_t events)
       if (pMsgIn)
       {      
         /* Process it */
-        ret = Router_HandleMlmeInput(pMsgIn);
+        rc = Router_HandleMlmeInput(pMsgIn);
         /* Messages from the MLME must always be freed. */
       }
     }
@@ -547,7 +620,7 @@ void AppTask(event_t events)
 static void UartRxCallBack(void) 
 {
   uint8_t pressedKey;
-	if(stateListen == gState){
+  if(stateListen == gState){
     TS_SendEvent(gAppTaskID_c, gAppEvtRxFromUart_c);
   }else{
 	  (void)UartX_GetByteFromRxBuffer(&pressedKey);
@@ -1561,6 +1634,57 @@ static uint8_t App_SendAssociateResponse(nwkMessage_t *pMsgIn)
     UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
     return errorAllocFailed;
   }
+}
+
+/******************************************************************************
+* The App_HandleScanEdConfirm(nwkMessage_t *pMsg) function will handle the
+* ED scan confirm message received from the MLME when the ED scan has completed.
+* The message contains the ED scan result list. This function will search the
+* list in order to select the logical channel with the least energy. The
+* selected channel is stored in the global variable called 'mLogicalChannel'.
+*
+******************************************************************************/
+static void App_HandleScanEdConfirm(nwkMessage_t *pMsg)
+{  
+  uint8_t n, minEnergy;
+  uint8_t *pEdList;
+  uint8_t ChannelMask;
+  
+  UartUtil_Print("Received the MLME-Scan Confirm message from the MAC\n\r", gAllowToBlock_d);
+    
+  /* Get a pointer to the energy detect results */
+  pEdList = pMsg->msgData.scanCnf.resList.pEnergyDetectList;
+  
+  /* Set the minimum energy to a large value */
+  minEnergy = 0xFF;
+
+  /* Select default channel */
+  mLogicalChannel = 11;
+ 
+  /* Search for the channel with least energy */
+  for(n=0; n<16; n++)
+  {
+    ChannelMask = n + 11;
+	if((pEdList[n] < minEnergy)&&((uint8_t)((mDefaultValueOfChannel_c>>ChannelMask) & 0x1)))
+    {
+      minEnergy = pEdList[n];
+      /* Channel numbering is 11 to 26 both inclusive */
+      mLogicalChannel = n + 11; 
+    }
+  }
+  
+  /* Print out the result of the ED scan */
+  UartUtil_Print("ED scan returned the following results:\n\r  [", gAllowToBlock_d);
+  UartUtil_PrintHex(pEdList, 16, gPrtHexBigEndian_c | gPrtHexSpaces_c);
+  UartUtil_Print("]\n\r\n\r", gAllowToBlock_d);
+  
+  /* Print out the selected logical channel */
+  UartUtil_Print("Based on the ED scan the logical channel 0x", gAllowToBlock_d);
+  UartUtil_PrintHex(&mLogicalChannel, 1, 0);
+  UartUtil_Print(" was selected\n\r", gAllowToBlock_d);
+  
+  /* The list of detected energies must be freed. */
+  MSG_Free(pEdList);
 }
 
 /******************************************************************************/

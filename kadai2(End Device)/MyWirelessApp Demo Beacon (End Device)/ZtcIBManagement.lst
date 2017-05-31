@@ -1,0 +1,45 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /******************************************************************************
+    2:  * Ztc access to the NWK/APS Information Base
+    3:  *
+    4:  * Copyright (c) 2008, Freescale, Inc.  All rights reserved.
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from Freescale Semiconductor.
+   10:  *
+   11:  ******************************************************************************/
+   12:  
+   13:  #include "EmbeddedTypes.h"
+   14:  
+   15:  #include "ZtcInterface.h"
+   16:  
+   17:  #if gZtcIncluded_d
+   18:  
+   19:  #include "FunctionLib.h"
+   20:  
+   21:  #include "ZtcPrivate.h"
+   22:  #include "ZtcClientCommunication.h"
+   23:  #include "ZtcIBManagement.h"
+   24:  
+   25:  /******************************************************************************
+   26:  *******************************************************************************
+   27:  * Private macros
+   28:  *******************************************************************************
+   29:  ******************************************************************************/
+   30:  
+   31:  /* determine which table to search */
+   32:  #define mRomTable_c 0x00
+   33:  #define mRamTable_c 0x01
+   34:  
+   35:  /******************************************************************************
+   36:  *******************************************************************************
+   37:  * Private prototypes
+   38:  *******************************************************************************
+   39:  ******************************************************************************/
+   40:  
+   41:  #endif                                  /* #if gZtcIncluded_d */
+   42:  
