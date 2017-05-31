@@ -1,0 +1,609 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /*****************************************************************************
+    2:  * Carrier Modulation Timer implementation 
+    3:  *
+    4:  * Copyrigtht (c) 2009, Freescale, Inc. All rights reserved
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from Freescale Semiconductor
+   10:  *
+   11:  *****************************************************************************/
+   12:  
+   13:  #include "EmbeddedTypes.h"
+   14:  #include "IrqControlLib.h"
+   15:  #include "IoConfig.h"
+   16:  #include "TS_Interface.h"
+   17:  #include "Cmt_Interface.h"
+   18:  #include "Cmt.h"
+   19:  
+   20:  /*****************************************************************************
+   21:  ******************************************************************************
+   22:  * Private macros
+   23:  ******************************************************************************
+   24:  *****************************************************************************/
+   25:  
+   26:  
+   27:  /*****************************************************************************
+   28:  ******************************************************************************
+   29:  * Private type definitions  
+   30:  ******************************************************************************
+   31:  *****************************************************************************/
+   32:  
+   33:  
+   34:  /*****************************************************************************
+   35:  ******************************************************************************
+   36:  * Private memory declaration
+   37:  ******************************************************************************
+   38:  *****************************************************************************/  
+   39:  #if(gCmtIncluded_d == 1)    
+   40:  
+   41:  /* Defines the Tx status activity flag */
+   42:  static volatile bool_t mCmt_TxActiveFlag;
+   43:  
+   44:  /* Id for the CMT task */
+   45:  static tsTaskID_t gCmtTaskId;
+   46:  
+   47:  /* CMT Task event; only one event is needed */
+   48:  #define mCMT_Event_c  (1<<0)
+   49:  
+   50:  /* Indicates the number of bits left to be send */
+   51:  static uint8_t mCmt_BitsLeft;
+   52:  
+   53:  /* Byte to be send onto the IRO pin */
+   54:  static uint8_t mCmt_DataByte;
+   55:  
+   56:  /* Current bit to be processed */
+   57:  static uint8_t mCmt_CurrentBit;
+   58:        
+   59:  /* Variables defining the mark/space width for logic 0/1 */
+   60:  static uint16_t mCmt_Log0MarkWidth;
+   61:  static uint16_t mCmt_Log0SpaceWidth;
+   62:  static uint16_t mCmt_Log1MarkWidth;
+   63:  static uint16_t mCmt_Log1SpaceWidth;
+   64:  
+   65:  /* Defines the CMT module mode of operation: either 'Time' or 'Baseband' */
+   66:  static bool_t mCmt_TimeOperMode;
+   67:  
+   68:  /* Defines the biwise shifting mode during bits transmisssion */
+   69:  static bool_t mCmt_LsbFirst;
+   70:  
+   71:  /* CMT callback function */
+   72:  static void (*pfCmtTxCallBack)(void);
+   73:  
+   74:  #endif
+   75:  
+   76:  /*****************************************************************************
+   77:  ******************************************************************************
+   78:  * Private function prototypes
+   79:  ******************************************************************************
+   80:  *****************************************************************************/ 
+   81:  #if(gCmtIncluded_d == 1)
+   82:    /* CMT Task; Process the CMT events in interrupt-driven context */
+   83:    static void CMT_Task(event_t events);
+   84:  #endif             
+   85:                
+   86:  /*****************************************************************************
+   87:  ******************************************************************************
+   88:  * Private functions
+   89:  ******************************************************************************
+   90:  *****************************************************************************/
+   91:  
+   92:  /* Initialize the CMT module */
+   93:  bool_t CMT_Initialize(void)
+   94:  {   
+   95:  #if(gCmtIncluded_d == 1)
+   96:    uint8_t mCmt_OutputPolarity = 0;
+   97:    bool_t retStatus = FALSE;
+   98:         
+   99:    /* Initialize the CMT task */
+  100:    gCmtTaskId = TS_CreateTask(gTsCmtTaskPriority_c, CMT_Task);
+  101:    
+  102:    if(gTsInvalidTaskID_c != gCmtTaskId)
+  103:    {
+  104:      /* Reloads CMT configuration registers to their reset state values together */
+  105:      /* with the clock input configuration */
+  106:      CMTOC   = mCMT_CMTOC_Reset_c | mCmtDividerDefault_c; 
+  107:      CMTMSC  = mCMT_CMTMSC_Reset_c | mCmtPrescaleDefault_c;
+  108:        
+  109:      /* Configure the carrier generation */
+  110:      CMTCGH1 = ComputeCarrierHigh(mCmtDefaultClockInput_c, gCmtDefaultCarrierFrequency_c, gCmtDefaultCarrierDutyCycle_c);
+  111:      CMTCGL1 = ComputeCarrierLow(mCmtDefaultClockInput_c, gCmtDefaultCarrierFrequency_c, gCmtDefaultCarrierDutyCycle_c); 
+  112:        
+  113:      /* Set mark/space period width for logic 0/1 bit with default values */
+  114:      /* Logic 0 */
+  115:      mCmt_Log0MarkWidth  = CmtModMarkTicksInMicroSeconds(gCmtDefaultLog0MarkInMicros_c, mCmtDefaultClockInput_c);
+  116:      mCmt_Log0SpaceWidth = CmtModSpaceTicksInMicroSeconds(gCmtDefaultLog0SpaceInMicros_c, mCmtDefaultClockInput_c);
+  117:      /* Logic 1 */
+  118:      mCmt_Log1MarkWidth  = CmtModMarkTicksInMicroSeconds(gCmtDefaultLog1MarkInMicros_c, mCmtDefaultClockInput_c);
+  119:      mCmt_Log1SpaceWidth = CmtModSpaceTicksInMicroSeconds(gCmtDefaultLog1SpaceInMicros_c, mCmtDefaultClockInput_c);
+  120:                    
+  121:      /* CMT Mode of operation: default */
+  122:      mCmt_TimeOperMode = gCmtTimeOperModeDefault_c;
+  123:        
+  124:      /* Bitwise shifting: default */
+  125:      mCmt_LsbFirst = gCmtLsbFirstDefault_c; 
+  126:        
+  127:      /* Deassert the Tx activity flag */
+  128:      mCmt_TxActiveFlag = FALSE;   
+  129:        
+  130:      /* Set the pointer callback to NULL */
+  131:      pfCmtTxCallBack = NULL; 
+  132:        
+  133:      #if(TRUE == gCmtOutputPolarityDefault_c)
+  134:        mCmt_OutputPolarity = mCMT_CMTOC_CMTPOL_c;
+  135:      #endif
+  136:      
+  137:      /* Enable the IRO output pin and set the polarity type */
+  138:      CMTOC |= (mCMT_CMTOC_IROPEN_c | mCmt_OutputPolarity); 
+  139:      
+  140:      /* Update the status to be return */
+  141:      retStatus = TRUE;     
+  142:    }
+  143:  
+  144:    return retStatus;
+  145:  #else
+  146:    return FALSE;
+  0000 4f       [1]             CLRA  
+  147:  #endif  
+  148:  }
+  0001 8d       [7]             RTC   
+  149:  
+  150:  /*****************************************************************************/
+  151:  cmtErr_t CMT_SetCarrierWaveform(uint8_t highCount, uint8_t lowCount)
+  152:  {
+  153:  #if(gCmtIncluded_d == 1)        
+  154:    cmtErr_t mStatusRet = gCmtErrNoErr_c;
+  155:      
+  156:    if((!highCount) || (!lowCount))
+  157:    {
+  158:      /*Invalid parameters: either 'highCount' or 'lowCount' was provided as 0 */
+  159:      mStatusRet = gCmtErrInvalidParameter_c; 
+  160:    }
+  161:    else
+  162:    {
+  163:      if(TRUE == mCmt_TxActiveFlag)
+  164:      {
+  165:        /* CMT module is busy */
+  166:        mStatusRet = gCmtErrBusy_c;   
+  167:      }
+  168:      else
+  169:      {
+  170:        /* Write CMT Carrier Generator Registers with appropriate values */
+  171:        CMTCGH1 = highCount;
+  172:        CMTCGL1 = lowCount;   
+  173:      }
+  174:    }
+  175:  
+  176:    /* Return the status code */
+  177:    return mStatusRet; 
+  178:  #else
+  179:    (void) highCount;
+  180:    (void) lowCount;
+  181:    return gCmtErrNoErr_c;
+  0000 4f       [1]             CLRA  
+  182:  #endif  
+  183:  }
+  0001 8d       [7]             RTC   
+  184:  
+  185:  /*****************************************************************************/
+  186:  void CMT_SetTxCallback(cmtCallback_t callback)
+  187:  {  
+  188:  #if(gCmtIncluded_d == 1)  
+  189:    /* CMT callback function will be "loaded" with provided argument pointer */
+  190:    pfCmtTxCallBack = callback; 
+  191:  #else
+  192:    (void) callback;
+  193:  #endif          
+  194:  }
+  0000 8d       [7]             RTC   
+  195:  
+  196:  /*****************************************************************************/
+  197:  cmtErr_t CMT_SetMarkSpaceLog0(uint16_t markPeriod, uint16_t spacePeriod)
+  198:  {   
+  199:  #if(gCmtIncluded_d == 1)  
+  200:    cmtErr_t mStatusRet = gCmtErrNoErr_c;
+  201:    
+  202:    /* Check input parameters */
+  203:    if((!markPeriod) && (!spacePeriod))
+  204:    {
+  205:      /* Invalid parameters: 'markPeriod' and 'spacePeriod' are both 0 */
+  206:      mStatusRet = gCmtErrInvalidParameter_c;
+  207:    }
+  208:    else
+  209:    {
+  210:      if(TRUE == mCmt_TxActiveFlag)
+  211:      {
+  212:        /* CMT is busy transmitting either a modulation cycle or a string of bits */
+  213:        mStatusRet = gCmtErrBusy_c;
+  214:      }
+  215:      else
+  216:      {
+  217:        /* Load the generic mark and space variables for logic 0 bit value */
+  218:        mCmt_Log0MarkWidth  = markPeriod;
+  219:        mCmt_Log0SpaceWidth = spacePeriod;
+  220:      }
+  221:    }
+  222:    
+  223:    /* Return the status code */
+  224:    return mStatusRet;
+  225:  #else
+  226:    (void) markPeriod;
+  227:    (void) spacePeriod;
+  228:    return gCmtErrNoErr_c;
+  0000 4f       [1]             CLRA  
+  229:  #endif
+  230:  }
+  0001 8d       [7]             RTC   
+  231:  
+  232:  /*****************************************************************************/
+  233:  cmtErr_t CMT_SetMarkSpaceLog1(uint16_t markPeriod, uint16_t spacePeriod)
+  234:  {
+  235:  #if(gCmtIncluded_d == 1)  
+  236:    cmtErr_t mStatusRet = gCmtErrNoErr_c;
+  237:    
+  238:    /* Check input parameters */
+  239:    if((!markPeriod) && (!spacePeriod))
+  240:    {
+  241:      /* Invalid parameters: 'markPeriod' and 'spacePeriod' are both 0 */
+  242:      mStatusRet = gCmtErrInvalidParameter_c;
+  243:    }
+  244:    else
+  245:    {
+  246:      if(TRUE == mCmt_TxActiveFlag)
+  247:      {
+  248:        /* CMT is busy transmitting either a modulation cycle or a string of bits */
+  249:        mStatusRet = gCmtErrBusy_c;
+  250:      }
+  251:      else
+  252:      {
+  253:        /* Load generic mark and space variables for logic 1 bit value */
+  254:        mCmt_Log1MarkWidth  = markPeriod;
+  255:        mCmt_Log1SpaceWidth = spacePeriod;   
+  256:      }
+  257:    }
+  258:    
+  259:    /* Return the status code */
+  260:    return mStatusRet;
+  261:  #else
+  262:    (void) markPeriod;
+  263:    (void) spacePeriod;
+  264:    return gCmtErrNoErr_c;    
+  0000 4f       [1]             CLRA  
+  265:  #endif
+  266:  }
+  0001 8d       [7]             RTC   
+  267:  
+  268:  /*****************************************************************************/
+  269:  cmtErr_t  CMT_TxBits(uint8_t data, uint8_t bitsCount)
+  270:  {
+  271:  #if(gCmtIncluded_d == 1)  
+  272:    cmtErr_t mStatusRet = gCmtErrNoErr_c;
+  273:    
+  274:    /* Check if parameters delivered are valid */
+  275:    if((bitsCount < 1) || (bitsCount > 8))
+  276:    {
+  277:      /* Invalid parameters: bitsCount is outside of interval [1..8] */
+  278:      mStatusRet = gCmtErrInvalidParameter_c;    
+  279:    }
+  280:    else
+  281:    {
+  282:      /* Check if another Tx operation is ongoing */
+  283:      if(TRUE == mCmt_TxActiveFlag)
+  284:      {
+  285:        /* CMT is busy by performing another transmission */
+  286:        mStatusRet = gCmtErrBusy_c;  
+  287:      }
+  288:      else
+  289:      {
+  290:        /* No other Tx operation ongoing */
+  291:        /* Select the CMT mode of operation */
+  292:        if(TRUE == mCmt_TimeOperMode)
+  293:        {
+  294:          /* Time mode */
+  295:          CMTMSC &= ~mCMT_CMTMSC_BASE_c;  
+  296:        }
+  297:        else
+  298:        {
+  299:          /* BaseBand mode */
+  300:          CMTMSC |= mCMT_CMTMSC_BASE_c; 
+  301:        }
+  302:               
+  303:        /* Stores the data in a module variable in order to be accessed also by CMT task */
+  304:        mCmt_DataByte = data;
+  305:        
+  306:        /* Depending on the bits shifting different bit is currently processing */
+  307:        if(TRUE == mCmt_LsbFirst)
+  308:        {
+  309:          /* LSB first */
+  310:          mCmt_CurrentBit = mCmt_DataByte & 0x01; 
+  311:        }
+  312:        else
+  313:        {
+  314:          /* MSB first */
+  315:          /* Aligns the data byte in order to have the MSB on the 8th byte position */
+  316:          mCmt_DataByte <<= (8 - bitsCount);
+  317:          /* Get the current bit position */
+  318:          mCmt_CurrentBit = mCmt_DataByte & 0x80;  
+  319:        }
+  320:        
+  321:        /* Determine the current bit value; depending on the logical bit value different mark/space group */ 
+  322:        /* is reloaded into modulation mark/space registers */
+  323:        if(!mCmt_CurrentBit) 
+  324:        {
+  325:          /* Bit value: Logic 0 */
+  326:          mCMT_Modulation_MarkRegs  = mCmt_Log0MarkWidth; 
+  327:          mCMT_Modulation_SpaceRegs = mCmt_Log0SpaceWidth;  
+  328:        }
+  329:        else
+  330:        {
+  331:          /* Bit value: Logic 1 */ 
+  332:          mCMT_Modulation_MarkRegs  = mCmt_Log1MarkWidth; 
+  333:          mCMT_Modulation_SpaceRegs = mCmt_Log1SpaceWidth;  
+  334:        }
+  335:        
+  336:        /* Configure the number of bits left to be send, as an indication for the CMT_ISR */
+  337:        mCmt_BitsLeft = bitsCount;
+  338:            
+  339:        /* Assert the Tx activity flag */
+  340:        mCmt_TxActiveFlag = TRUE;  
+  341:      
+  342:        /* Enable the CMT interrupt and the CMT module */
+  343:        CMTMSC |= (mCMT_CMTMSC_EOCIE_c | mCMT_CMTMSC_MCGEN_c);                    
+  344:      } 
+  345:    }
+  346:    
+  347:    /* Return the status code */
+  348:    return mStatusRet;
+  349:  #else
+  350:    (void) data;
+  351:    (void) bitsCount;
+  352:    return gCmtErrNoErr_c;
+  0000 4f       [1]             CLRA  
+  353:  #endif
+  354:  }
+  0001 8d       [7]             RTC   
+  355:  
+  356:  /*****************************************************************************/
+  357:  cmtErr_t CMT_TxModCycle(uint16_t markPeriod, uint16_t spacePeriod)
+  358:  {
+  359:  #if(gCmtIncluded_d == 1)  
+  360:    cmtErr_t mStatusRet = gCmtErrNoErr_c;
+  361:    
+  362:    /* Check if parameters delivered are valid */
+  363:    if((!markPeriod) && (!spacePeriod))
+  364:    {
+  365:      /* Invalid parameters: both 'markPeriod' and 'spacePeriod' provided are 0 */
+  366:      mStatusRet = gCmtErrInvalidParameter_c; 
+  367:    }
+  368:    else
+  369:    {       
+  370:      /* Check if another Tx operation is ongoing */
+  371:      if(TRUE == mCmt_TxActiveFlag)
+  372:      {      
+  373:        /* CMT is busy by performing another transmission */
+  374:        mStatusRet = gCmtErrBusy_c;
+  375:      }
+  376:      else
+  377:      {       
+  378:        /* No other Tx operation ongoing */
+  379:        /* Select the CMT mode of operation */
+  380:        if(TRUE == mCmt_TimeOperMode)
+  381:        {
+  382:          /* Time mode */
+  383:          CMTMSC &= ~mCMT_CMTMSC_BASE_c;
+  384:        }
+  385:        else
+  386:        {
+  387:          /* BaseBand mode */
+  388:          CMTMSC |= mCMT_CMTMSC_BASE_c;
+  389:        }
+  390:        
+  391:        /* Configures the registers for modulation cycle mark and space */
+  392:        /* mark: CMTCMD1: CMTCMD2  space: CMTCMD3: CMTCMD4   */   
+  393:              
+  394:        /* Note: the following two expressions are valid taking into account that the default */
+  395:        /*       endianism mode is 'BigEndian' */
+  396:        mCMT_Modulation_MarkRegs  = markPeriod;
+  397:        mCMT_Modulation_SpaceRegs = spacePeriod;
+  398:        
+  399:        /* Number of bits left to be send */
+  400:        mCmt_BitsLeft = 1;
+  401:                   
+  402:        /* Assert the Tx activity flag */
+  403:        mCmt_TxActiveFlag = TRUE;  
+  404:        
+  405:        /* Enable the CMT interrupt and the CMT module */
+  406:        CMTMSC |= (mCMT_CMTMSC_EOCIE_c | mCMT_CMTMSC_MCGEN_c);  
+  407:      }
+  408:    }
+  409:     
+  410:    /* Return the status code */
+  411:    return mStatusRet; 
+  412:  #else
+  413:    (void) markPeriod; 
+  414:    (void) spacePeriod;
+  415:    return gCmtErrNoErr_c;
+  0000 4f       [1]             CLRA  
+  416:  #endif
+  417:  }
+  0001 8d       [7]             RTC   
+  418:  
+  419:  /*****************************************************************************/
+  420:  void CMT_Abort(void)
+  421:  {
+  422:  #if(gCmtIncluded_d == 1)
+  423:    /* Check if there is any ongoing Tx activity */
+  424:    if(TRUE == mCmt_TxActiveFlag)
+  425:    {   
+  426:      /* Disable the module, the output pin and the CMT interrupt */
+  427:      CMTMSC &= ~(mCMT_CMTMSC_MCGEN_c | mCMT_CMTOC_IROPEN_c | mCMT_CMTMSC_EOCIE_c);
+  428:      
+  429:      /* Deassert the Tx activity flag */
+  430:      mCmt_TxActiveFlag = FALSE;
+  431:    }
+  432:  #endif
+  433:  }
+  0000 8d       [7]             RTC   
+  434:  
+  435:  /*****************************************************************************/
+  436:  bool_t CMT_IsTxActive(void)
+  437:  {
+  438:  #if(gCmtIncluded_d == 1) 
+  439:    return mCmt_TxActiveFlag;  
+  440:  #else
+  441:    return FALSE;
+  0000 4f       [1]             CLRA  
+  442:  #endif
+  443:  }
+  0001 8d       [7]             RTC   
+  444:  
+  445:  /****************************************************************************/
+  446:  cmtErr_t CMT_SetModOperation(bool_t timeOperMode)
+  447:  {
+  448:  #if(gCmtIncluded_d == 1)  
+  449:    cmtErr_t mStatusRet = gCmtErrNoErr_c;
+  450:    
+  451:    /* Check if another Tx operation is ongoing */
+  452:    if(TRUE == mCmt_TxActiveFlag)
+  453:    {      
+  454:      /* CMT is busy by performing another transmission */
+  455:      mStatusRet = gCmtErrBusy_c;
+  456:    }
+  457:    else
+  458:    {       
+  459:      /* No other Tx operation ongoing */
+  460:      /* Set the CMT mode of operation */ 
+  461:      mCmt_TimeOperMode = (TRUE == timeOperMode) ? TRUE : FALSE;    
+  462:    }
+  463:    
+  464:    /* Return the status code */
+  465:    return mStatusRet; 
+  466:  #else
+  467:    (void) timeOperMode;
+  468:    return gCmtErrNoErr_c;
+  0000 4f       [1]             CLRA  
+  469:  #endif   
+  470:  }
+  0001 8d       [7]             RTC   
+  471:  
+  472:  /*****************************************************************************/
+  473:  cmtErr_t CMT_SetBitsShifting(bool_t bitsLsbShifting) 
+  474:  {
+  475:  #if(gCmtIncluded_d == 1)  
+  476:    cmtErr_t mStatusRet = gCmtErrNoErr_c;
+  477:    
+  478:    /* Check if another Tx operation is ongoing */
+  479:    if(TRUE == mCmt_TxActiveFlag)
+  480:    {      
+  481:      /* CMT is busy by performing another transmission */
+  482:      mStatusRet = gCmtErrBusy_c;
+  483:    }
+  484:    else
+  485:    {       
+  486:      /* No other Tx operation ongoing */
+  487:      /* Set the CMT bits shifting */ 
+  488:      mCmt_LsbFirst = (TRUE == bitsLsbShifting) ? TRUE : FALSE;    
+  489:    }
+  490:      
+  491:    /* Return the status code */
+  492:    return mStatusRet;   
+  493:  #else
+  494:    (void) bitsLsbShifting;
+  495:    return gCmtErrNoErr_c;
+  0000 4f       [1]             CLRA  
+  496:  #endif
+  497:  } 
+  0001 8d       [7]             RTC   
+  498:  
+  499:  
+  500:  /*****************************************************************************/
+  501:  /* Place it in NON_BANKED memory */
+  502:  #ifdef MEMORY_MODEL_BANKED
+  503:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+  504:  #else
+  505:  #pragma CODE_SEG DEFAULT
+  506:  #endif /* MEMORY_MODEL_BANKED */ 
+  507:  /* CMT Interrupt Service Routine */
+  508:  INTERRUPT_KEYWORD void CMT_InterruptHandler(void)
+  509:  {
+  510:  #if(gCmtIncluded_d == 1)  
+  511:    volatile uint8_t dummyRead;
+  512:      
+  513:    /* Clear the EOCF bit by reading the CMTMSC and accessing the CMTCMD2 register */
+  514:    dummyRead = CMTMSC;
+  515:      
+  516:    /* Touch the CMTCMD2 register */
+  517:    dummyRead = CMTCMD2;
+  518:   
+  519:    /* Check the number of bits left for Tx */
+  520:    if((--mCmt_BitsLeft) != 0)
+  521:    {
+  522:      /* There still available bits for transmission */
+  523:      /* Depending on the bits shifting, different bit is loaded to be send */
+  524:      if(TRUE == mCmt_LsbFirst)
+  525:      {
+  526:        /* LSB first */
+  527:        /* Shift the data byte by one bit to the right */
+  528:        mCmt_DataByte >>= 1;
+  529:        /* Get the current bit value */
+  530:        mCmt_CurrentBit = (mCmt_DataByte & 0x01);   
+  531:      }
+  532:      else
+  533:      {
+  534:        /* MSB first */
+  535:        /* Shift the data byte by one bit to the left */ 
+  536:        mCmt_DataByte <<= 1;
+  537:        /* Get the current bit value */        
+  538:        mCmt_CurrentBit = (mCmt_DataByte & 0x80);    
+  539:      }
+  540:              
+  541:      /* Determine the current bit value; depending on the logical bit value different mark/space group */ 
+  542:      /* is reloaded into modulation mark/space registers */
+  543:      if(!mCmt_CurrentBit) 
+  544:      {
+  545:        /* Bit value: Logic 0 */
+  546:        mCMT_Modulation_MarkRegs  = mCmt_Log0MarkWidth; 
+  547:        mCMT_Modulation_SpaceRegs = mCmt_Log0SpaceWidth;  
+  548:      }
+  549:      else
+  550:      {
+  551:        /* Bit value: Logic 1 */ 
+  552:        mCMT_Modulation_MarkRegs  = mCmt_Log1MarkWidth; 
+  553:        mCMT_Modulation_SpaceRegs = mCmt_Log1SpaceWidth;  
+  554:      }         
+  555:    }
+  556:    else
+  557:    {
+  558:      /* The number of bits to be sent has been finished */              
+  559:      /* Disable the module and the CMT interrupt */
+  560:      CMTMSC &= ~(mCMT_CMTMSC_MCGEN_c | mCMT_CMTMSC_EOCIE_c);  
+  561:    
+  562:      /* Deasserts the Tx active flag */
+  563:      mCmt_TxActiveFlag = FALSE;       
+  564:                
+  565:      /* Send event to the task scheduler */
+  566:      TS_SendEvent(gCmtTaskId, mCMT_Event_c); 
+  567:    }
+  568:  #endif
+  569:  }
+  0000 80       [9]             RTI   
+  570:  #pragma CODE_SEG DEFAULT
+  571:  
+  572:  /*****************************************************************************/
+  573:  #if(gCmtIncluded_d == 1)
+  574:    static void CMT_Task(event_t events)
+  575:    {
+  576:      /* Touch the 'events' argument to avoid compiler warnings */
+  577:      (void)events;    
+  578:        
+  579:      /* Call the function callback; if it is a valid pointer to it */    
+  580:      if(pfCmtTxCallBack)
+  581:      {
+  582:        pfCmtTxCallBack();
+  583:      }  
+  584:    }
+  585:  #endif 

@@ -1,0 +1,326 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /*****************************************************************************
+    2:  * MyWirelessApp Demo Beacon End Device application.
+    3:  *
+    4:  * (c) Copyright 2008, Freescale, Inc. All rights reserved.
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from Freescale Semiconductor.
+   10:  *
+   11:  *****************************************************************************/
+   12:  
+   13:  #include "MApp.h"
+   14:  #include "Sound.h"
+   15:  #include "NVM_Interface.h"
+   16:  #include "CMT_interface.h"
+   17:  #include "IIC_Interface.h" // New
+   18:  //#include "IoConfig.h"
+   19:  
+   20:  
+   21:  /************************************************************************************
+   22:  *************************************************************************************
+   23:  * Private macros
+   24:  *************************************************************************************
+   25:  ************************************************************************************/
+   26:  
+   27:  /* If there are too many pending packets to be send over the air, */
+   28:  /* receive mMaxKeysToReceive_c chars. */
+   29:  /* The chars will be send over the air when there are no pending packets*/
+   30:  #define mMaxKeysToReceive_c 32
+   31:  
+   32:  //----------Sensor switch--------
+   33:  #define gMPL3115A2_enable 0
+   34:  #define gMMA8652_enable   1
+   35:  #define gMAG3110_enable   0
+   36:  #define gFXAS21000_enable 0
+   37:  #define gMMA9553_enable   0
+   38:  //-------------------------------
+   39:  
+   40:  /************************************************************************************
+   41:  *************************************************************************************
+   42:  * Private prototypes
+   43:  *************************************************************************************
+   44:  ************************************************************************************/
+   45:  
+   46:  /* Forward declarations of helper functions */
+   47:  static void    UartRxCallBack(void);
+   48:  static uint8_t App_StartScan(uint8_t scanType);
+   49:  static uint8_t App_HandleScanActiveConfirm(nwkMessage_t *pMsg);
+   50:  static uint8_t App_WaitMsg(nwkMessage_t *pMsg, uint8_t msgType);
+   51:  static uint8_t App_SendAssociateRequest(void);
+   52:  static uint8_t App_HandleAssociateConfirm(nwkMessage_t *pMsg);
+   53:  static void    App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn);
+   54:  static void    App_TransmitSensorData(void);
+   55:  #if (gMC1323xMatrixKBD_d == TRUE)
+   56:  static void    App_HandleKeys(uint8_t events, uint8_t pressedKey);
+   57:  #else
+   58:  static void    App_HandleKeys(key_event_t events);
+   59:  #endif //gMC1323xMatrixKBD_d
+   60:  
+   61:  static uint8_t App_HandleMlmeInput(nwkMessage_t *pMsg);
+   62:  static uint8_t App_SendSyncRequest(void);
+   63:  static void GenandTransData(uint8_t Length, uint8_t* pTxData, uint8_t* dest_addr);
+   64:  
+   65:  static void count_timer  (uint8_t timerId);
+   66:  
+   67:  /* added by yusk */
+   68:  static void Router_TransmitUartData(void);
+   69:  static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg);
+   70:  static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn);
+   71:  
+   72:  /* added by j */
+   73:  static uint8_t App_StartRooter(void);
+   74:  static void App_HandleScanEdConfirm(nwkMessage_t *pMsg);
+   75:  
+   76:  volatile static uint8_t global_counter;
+   77:  
+   78:  static void count_timer(uint8_t timerId){
+   79:  	uint8_t data[2];
+   80:  	(void)timerId;  /* prevent compiler warning */
+   81:  	global_counter++;
+  0000 450000   [3]             LDHX  @global_counter
+  0003 7c       [4]             INC   ,X
+   82:  }
+  0004 8d       [7]             RTC   
+   83:  
+   84:  /************************************************************************************
+   85:  *************************************************************************************
+   86:  * Private memory declarations
+   87:  *************************************************************************************
+   88:  ************************************************************************************/
+   89:  
+   90:  //Default Pan ID
+   91:  static const uint8_t coordinaterPanId[2] = { (mDefaultValueOfPanId_c & 0xff), (mDefaultValueOfPanId_c >> 8)};
+   92:  
+   93:  /* The current logical channel (frequency band) */
+   94:  static uint8_t mLogicalChannel;
+   95:  
+   96:  
+   97:  /************************************************************************************
+   98:  *************************************************************************************
+   99:  * Private memory declarations
+  100:  *************************************************************************************
+  101:  ************************************************************************************/
+  102:  
+  103:  /* The short address and PAN ID of the coordinator*/
+  104:  static const uint8_t maShortAddress[2] = { (mDefaultValueOfShortAddress_c & 0xff), (mDefaultValueOfShortAddress_c >> 8)};
+  105:  static const uint8_t maPanId[2] = { (mDefaultValueOfPanId_c & 0xff), (mDefaultValueOfPanId_c >> 8)};
+  106:  
+  107:  /* The current logical channel (frequency band) */
+  108:  static uint8_t mLogicalChannel;
+  109:  
+  110:  /* These byte arrays stores an associated
+  111:     devices long and short addresses. */
+  112:  static uint8_t maDeviceShortAddress[2];
+  113:  static uint8_t maDeviceLongAddress[8];
+  114:  
+  115:  /* Data request packet for sending UART input to the coordinator */
+  116:  static nwkToMcpsMessage_t *mpPacket;
+  117:  
+  118:  /* The MSDU handle is a unique data packet identifier */
+  119:  static uint8_t mMsduHandle;
+  120:  
+  121:  /* Number of pending data packets */
+  122:  static uint8_t mcPendingPackets;
+  123:  
+  124:  
+  125:  /* Information about the PAN we are part of */
+  126:  static panDescriptor_t mCoordInfo;
+  127:  
+  128:  /* This is either the short address assigned by the PAN coordinator
+  129:     during association, or our own extended MAC address. */
+  130:  static uint8_t maMyAddress[8];
+  131:  
+  132:  /* The devices address mode. If 2 (gAddrModeShort_c), then maMyAddress
+  133:     contains the short address assigned by the PAN coordinator. If 3
+  134:     (gAddrModeLong_c), then maMyAddress is equal to the extended address. */
+  135:  static uint8_t mAddrMode;
+  136:  
+  137:  /* Data request packet for sending UART input to the coordinator */
+  138:  static nwkToMcpsMessage_t *mpPacket;
+  139:  
+  140:  /* The MSDU handle is a unique data packet identifier */
+  141:  static uint8_t mMsduHandle;
+  142:  
+  143:  /* Number of pending data packets */
+  144:  static uint8_t mcPendingPackets;
+  145:  
+  146:  /* Application input queues */
+  147:  static anchor_t mMlmeNwkInputQueue;
+  148:  static anchor_t mMcpsNwkInputQueue;
+  149:  
+  150:  /************************************************************************************
+  151:  *************************************************************************************
+  152:  * Public memory declarations
+  153:  *************************************************************************************
+  154:  ************************************************************************************/
+  155:  
+  156:  /* The current state of the applications state machine */
+  157:  uint8_t gState;
+  158:  
+  159:  uint8_t MPL3115A2_start_flag = 0;
+  160:  uint8_t MMA8652_start_flag   = 0;
+  161:  uint8_t MAG3110_start_flag   = 0;
+  162:  uint8_t FXAS21000_start_flag = 0;
+  163:  uint8_t MMA9553_start_flag   = 0;
+  164:  
+  165:  /* This data set contains application variables to be preserved across resets */
+  166:  NvDataItemDescription_t const gaNvAppDataSet[] = {
+  167:    {NULL, 0}       /* Required end-of-table marker. */
+  168:  };
+  169:  
+  170:  STATIC tmrTimerID_t mTimerID = gTmrInvalidTimerID_c;
+  171:  
+  172:  /************************************************************************************
+  173:  *************************************************************************************
+  174:  * Public functions
+  175:  *************************************************************************************
+  176:  ************************************************************************************/
+  177:  
+  178:  void DeepSleepWakeupStackProc(void);
+  179:  
+  180:  /*****************************************************************************
+  181:  * Initialization function for the App Task. This is called during
+  182:  * initialization and should contain any application specific initialization
+  183:  * (ie. hardware initialization/setup, table initialization, power up
+  184:  * notificaiton.
+  185:  *
+  186:  * Interface assumptions: None
+  187:  *
+  188:  * Return value: None
+  189:  *
+  190:  *****************************************************************************/
+  191:  void MApp_init(void)
+  192:  { 
+  193:    
+  194:    /* The initial application state */
+  195:    gState = stateInit;    
+  0000 4f       [1]             CLRA  
+  0001 c70000   [4]             STA   gState
+  196:    /* Reset number of pending packets */
+  197:    mcPendingPackets = 0;
+  0004 c70000   [4]             STA   mcPendingPackets
+  198:  
+  199:    /* Initialize the MAC 802.15.4 extended address */
+  200:    Init_MacExtendedAddress();
+  0007 ac000000 [8]             CALL  Init_MacExtendedAddress
+  201:    /* register keyboard callback function */
+  202:    KBD_Init(App_HandleKeys);
+  000b 450000   [3]             LDHX  @App_HandleKeys
+  000e 89       [2]             PSHX  
+  000f 8b       [2]             PSHH  
+  0010 a600     [2]             LDA   @App_HandleKeys:PAGE
+  0012 87       [2]             PSHA  
+  0013 ac000000 [8]             CALL  KBD_Init
+  0017 a703     [2]             AIS   #3
+  203:    /* Initialize SPI Module */
+  204:    SPI_Init();
+  0019 ac000000 [8]             CALL  SPI1_Init
+  205:    /* initialize LCD Module */
+  206:    LCD_Init();
+  207:    /* initialize LED Module */
+  208:    LED_Init();
+  001d ac000000 [8]             CALL  LED_Init
+  209:    /* Initialize the LPM module */
+  210:    PWRLib_Init();
+  0021 ac000000 [8]             CALL  PWRLib_Init
+  211:    /* Initialize the UART so that we can print out status messages */
+  212:    UartX_SetBaud(gUartDefaultBaud_c);
+  0025 ae34     [2]             LDX   #52
+  0027 8c       [1]             CLRH  
+  0028 ac000000 [8]             CALL  Uart1_SetBaud
+  213:    UartX_SetRxCallBack(UartRxCallBack);
+  002c 450000   [3]             LDHX  @UartRxCallBack
+  002f 89       [2]             PSHX  
+  0030 8b       [2]             PSHH  
+  0031 a600     [2]             LDA   @UartRxCallBack:PAGE
+  0033 87       [2]             PSHA  
+  0034 ac000000 [8]             CALL  Uart1_SetRxCallBack
+  0038 a703     [2]             AIS   #3
+  214:    
+  215:    /* Initialize the IIC module */
+  216:    IIC_Bus_Reset();  // Reset IIC bus to prevent freezing sensor module using GPIO 
+  003a ac000000 [8]             CALL  IIC_Bus_Reset
+  217:    IIC_ModuleInit(); // New      
+  003e ac000000 [8]             CALL  IIC_ModuleInit
+  218:        
+  219:  #if gMPL3115A2_enable
+  220:    MPL3115A2_Init();
+  221:  #endif
+  222:    
+  223:  #if gMMA8652_enable
+  224:    MMA8652_Init();
+  0042 ac000000 [8]             CALL  MMA8652_Init
+  225:  #endif   
+  226:  
+  227:  #if gMAG3110_enable
+  228:    MAG3110_Init();
+  229:  #endif 
+  230:    
+  231:  #if gFXAS21000_enable
+  232:    FXAS21000_Init();
+  233:  #endif 
+  234:   
+  235:  #if gMMA9553_enable
+  236:    MMA9553_Init();
+  237:  #endif   
+  238:    
+  239:    /* initialize buzzer (NCB, SRB only) */  
+  240:    BuzzerInit();  
+  241:    /* Prepare input queues.*/
+  242:    MSG_InitQueue(&mMlmeNwkInputQueue); 
+  0046 450000   [3]             LDHX  @mMlmeNwkInputQueue
+  0049 ac000000 [8]             CALL  List_ClearAnchor
+  243:    MSG_InitQueue(&mMcpsNwkInputQueue);  
+  004d 450000   [3]             LDHX  @mMcpsNwkInputQueue
+  0050 ac000000 [8]             CALL  List_ClearAnchor
+  244:    /* Enable MCU interrupts */
+  245:    IrqControlLib_EnableAllIrqs();
+  0054 9a       [1]             CLI   
+  246:    /*signal app ready*/  
+  247:    Led1Flashing();
+  0055 a601     [2]             LDA   #1
+  0057 ac000000 [8]             CALL  LED_StartFlash
+  248:    Led2Flashing();
+  005b a602     [2]             LDA   #2
+  005d ac000000 [8]             CALL  LED_StartFlash
+  249:    Led3Flashing();
+  0061 a604     [2]             LDA   #4
+  0063 ac000000 [8]             CALL  LED_StartFlash
+  250:    Led4Flashing();
+  0067 a608     [2]             LDA   #8
+  0069 ac000000 [8]             CALL  LED_StartFlash
+  251:      
+  252:    UartUtil_Print("\n\rPress any switch on board to start running the application.\n\r", gAllowToBlock_d);  
+  006d 450000   [3]             LDHX  @"\012\015Press any switch on board to start running the application.\012\015"
+  0070 a601     [2]             LDA   #1
+  0072 ac000000 [8]             CALL  UartUtil_Print
+  253:    
+  254:    LCD_WriteString(1,"Press any key");
+  255:    LCD_WriteString(2,"to start.");
+  256:    
+  257:    mTimerID = TMR_AllocateTimer();
+  0076 ac000000 [8]             CALL  TMR_AllocateTimer
+  007a c70000   [4]             STA   mTimerID
+  258:    TMR_StartIntervalTimer(mTimerID, 1000, count_timer);
+  007d 87       [2]             PSHA  
+  007e 4503e8   [3]             LDHX  #1000
+  0081 89       [2]             PSHX  
+  0082 8b       [2]             PSHH  
+  0083 4f       [1]             CLRA  
+  0084 87       [2]             PSHA  
+  0085 87       [2]             PSHA  
+  0086 450000   [3]             LDHX  @count_timer
+  0089 89       [2]             PSHX  
+  008a 8b       [2]             PSHH  
+  008b a600     [2]             LDA   @count_timer:PAGE
+  008d 87       [2]             PSHA  
+  008e ac000000 [8]             CALL  TMR_StartIntervalTimer
+  0092 a708     [2]             AIS   #8
+  259:    
+  260:  }
+  0094 8d       [7]             RTC   

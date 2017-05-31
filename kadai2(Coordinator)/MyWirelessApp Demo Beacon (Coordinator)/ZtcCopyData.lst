@@ -1,0 +1,1171 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /******************************************************************************
+    2:  * ZTC data format conversion routines.
+    3:  *
+    4:  * Copyright (c) 2008, Freescale, Inc.  All rights reserved.
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from Freescale Semiconductor.
+   10:  *
+   11:  * Ztc needs to copy external packet client to/from SAP Handler message data.
+   12:  * The sometimes the formats are just a length + data (simple format), but
+   13:  * sometimes they are more complicated, involving variable length arrays
+   14:  * and/or pointers to data.
+   15:  *
+   16:  * *warning* In general, no effort is made to verify the correctness or
+   17:  * internal consistency of the data.
+   18:  ******************************************************************************/
+   19:  
+   20:  #include "EmbeddedTypes.h"
+   21:  
+   22:  #include "ZtcInterface.h"
+   23:  
+   24:  #if gZtcIncluded_d
+   25:  
+   26:  #include "MsgSystem.h"
+   27:  #include "FunctionLib.h"
+   28:  #include "FunctionalityDefines.h"
+   29:  #include "PublicConst.h"
+   30:  
+   31:  #include "AppAspInterface.h"
+   32:  
+   33:  #include "ZtcPrivate.h"
+   34:  #include "ZtcClientCommunication.h"
+   35:  #include "ZtcMsgTypeInfo.h"
+   36:  #include "ZtcSAPHandlerInfo.h"
+   37:  #include "ZtcMacPIB.h"
+   38:  #include "ZtcCopyData.h"
+   39:  
+   40:  #include "AspZtc.h"
+   41:  
+   42:  /******************************************************************************
+   43:  *******************************************************************************
+   44:  * Private macros
+   45:  *******************************************************************************
+   46:  ******************************************************************************/
+   47:  /* 26 channels bit mapped into 32 bits,ie 4 Bytes(0-3) */
+   48:  #define ByteOffset							0x03
+   49:  /* mask everything except 3rd */
+   50:  #define MaskAllExceptThirdByte	0x04
+   51:  #define ShiftRightByOne         0x01
+   52:  
+   53:  /******************************************************************************
+   54:  *******************************************************************************
+   55:  * Private type definitions
+   56:  *******************************************************************************
+   57:  ******************************************************************************/
+   58:  
+   59:  /******************************************************************************
+   60:  *******************************************************************************
+   61:  * Private memory declarations
+   62:  *******************************************************************************
+   63:  ******************************************************************************/
+   64:  
+   65:  #if gSAPMessagesEnableMlme_d || gSAPMessagesEnableNlme_d
+   66:  static uint8_t maScanChannels[ 4 ];		/* Buffer to hold Scanned Channels */
+   67:  #endif
+   68:  
+   69:  /****************************************************************************/
+   70:  
+   71:  /* Tables related to the length-code-and-pointer data format.
+   72:   *
+   73:   * Each entry in the main table for this format contains a pointer
+   74:   * to a subtable that specifies the data lengths associated with
+   75:   * particular values of the length code field.
+   76:   */
+   77:  
+   78:  /* Used for MacSetPIBAttribute.Request (85 09), aka MLME-SET.request, */
+   79:  /*      and MacGetPIBAttribute.Confirm (84 05), aka MLME-GET.confirm. */
+   80:  #if mZtcLenCodeAndPtrFormat_d
+   81:  #define CodeAndLenMacSetReq(index, len) \
+   82:    {index, len},
+   83:  ztcCodeAndLen_t const maZtcMacSetDataLengthsTable[] = {
+   84:  #include "ZtcCopyDataTbl.h"
+   85:  };
+   86:  
+   87:  #define FmtLenCodeAndPtr(name, hdrLen, offsetToPtr, offsetToCount, \
+   88:                           offsetToLenCode, tableOfDataLengths, offsetToMsgData) \
+   89:    {hdrLen, offsetToPtr, offsetToCount, offsetToLenCode, tableOfDataLengths, \
+   90:     NumberOfElements(tableOfDataLengths), offsetToMsgData},
+   91:  
+   92:  ztcFmtLenCodeAndPtr_t const maZtcFmtLenCodeAndPtrTable[] = {
+   93:  #include "ZtcCopyDataTbl.h"
+   94:  };
+   95:  #endif                                  /* #if mZtcLenCodeAndPtrFormat_d */
+   96:  
+   97:  /****************************************************************************/
+   98:  
+   99:  /* Define the table for the two-array-pointers data format. */
+  100:  #define FmtTwoArrayPtrs(name, hdrLen, \
+  101:                          offsetToPtr1, offsetToCount1, array1ElementLen, \
+  102:                          offsetToMsgData,                                \
+  103:                          offsetToPtr2, offsetToCount2, array2ElementLen) \
+  104:    {hdrLen, \
+  105:     offsetToPtr1, offsetToCount1, array1ElementLen, offsetToMsgData, \
+  106:     offsetToPtr2, offsetToCount2, array2ElementLen},
+  107:  
+  108:  ztcFmtTwoArrayPtrs_t const maZtcFmtTwoArrayPtrsTable[] = {
+  109:  #include "ZtcCopyDataTbl.h"
+  110:  };
+  111:  
+  112:  /****************************************************************************/
+  113:  
+  114:  /* Instead of pointers to functions, the main format table saves space by */
+  115:  /* storing indexes into tables of functions. Declare the indexes. */
+  116:  #define PktFromMsgFunction(index, pFunction)  pFunction,
+  117:  pZtcMsgFromPkt_t const maPktFromMsgFunctionTable [] = {
+  118:  #include "ZtcCopyDataTbl.h"
+  119:  };
+  120:  
+  121:  #define MsgFromPktFunction(index, pFunction)  pFunction,
+  122:  pZtcMsgFromPkt_t const maMsgFromPktFunctionTable[] = {
+  123:  #include "ZtcCopyDataTbl.h"
+  124:  };
+  125:  
+  126:  /****************************************************************************/
+  127:  
+  128:  /* Define the main data format table.
+  129:   *
+  130:   * Each entry in the main message type info table contains an index to this
+  131:   *table.
+  132:   *
+  133:   * Each entry in this table contains the pointers-to-functions and indexes-to-
+  134:   * parameter tables used by one format.
+  135:   */
+  136:  #define Fmt(name, pktFromMsgFuncIndex, pktFromMsgParamIndex, \
+  137:              msgFromPktFuncIndex, msgFromPktParamIndex)             \
+  138:    {ZtcSetFmtFuncIndexes(pktFromMsgFuncIndex, msgFromPktFuncIndex), \
+  139:     pktFromMsgParamIndex, msgFromPktParamIndex},
+  140:  ztcFmtInfo_t const maZtcFmtInfoTable[] = {
+  141:  #include "ZtcCopyDataTbl.h"
+  142:  };
+  143:  
+  144:  /******************************************************************************
+  145:  *******************************************************************************
+  146:  * Public functions
+  147:  *******************************************************************************
+  148:  ******************************************************************************/
+  149:  
+  150:  
+  151:  /****************************************************************************/
+  152:  
+  153:  /* The packet contains a header and some number of fixed length array elements.
+  154:   * The length of the array elements is specified indirectly by a length code
+  155:   * in the packet header.
+  156:   *
+  157:   * There are some messages that use the length code approach, but that have
+  158:   * either a simgle data value instead of an array, and/or that have no pointer
+  159:   * (the data is immediately after the header). The secondary format table,
+  160:   * maZtcFmtLenCodeAndPtrTable[], may contain special values (-1) for the
+  161:   * offset-to-number-of-elements and/or offset-to-pointer fields to indicate
+  162:   * these exceptions.
+  163:   *
+  164:   * Copy the packet header to the message header. Look up the length code
+  165:   * in the code-and-lengths table. Copy the data from the packet to the
+  166:   * message, at the message offset specified by offsetToMsgData. Store a
+  167:   * pointer to the data at the offsetToPtr offset in the message header.
+  168:   *
+  169:   * Source packet:
+  170:   *  | F | A | L |
+  171:   *    ^   ^   ^
+  172:   *    |   |   +-- Last part of header.
+  173:   *    |   +------ Variable length array.
+  174:   *    +---------- First part of header, including:
+  175:   *                a length code field, and
+  176:   *                a count of the number of elements in the array.
+  177:   *
+  178:   * Destination message:
+  179:   *  | F | P | L | G | A |
+  180:   *    ^   ^   ^   ^
+  181:   *    |   |   |   |   +-- Variable length array.
+  182:   *    |   |   |   +------ Gap between pointer and data. May be any length.
+  183:   *    |   |   +---------- Last part of header.
+  184:   *    |   +-------------- Pointer to "A".
+  185:   *    +------------------ First part of header.
+  186:   */
+  187:  #if mZtcLenCodeAndPtrFormat_d
+  188:  index_t ZtcMsgFromPktLenCodeAndPtr
+  189:    (
+  190:    uint8_t *pMsg,
+  191:    index_t msgLen,
+  192:    uint8_t *pPkt,
+  193:    index_t pktLen,
+  194:    index_t fmtParametersIndex
+  195:    )
+  196:  {
+  197:    index_t arrayLen;                     /* Risky on an 8 bit CPU. */
+  198:    index_t code;
+  199:    index_t elementLen;
+  200:    ztcFmtLenCodeAndPtr_t fmtInfo;
+  201:    index_t hdrTotalLen;
+  202:    index_t hdrFirstPartLen;
+  203:    index_t i;
+  204:    index_t numberOfArrayElements;
+  205:    index_t offsetToCount;
+  206:    index_t offsetToMsgArray;
+  207:    ztcCodeAndLen_t const *pCodeAndLenTable;
+  208:    index_t totalDstLen;                  /* Risky on an 8 bit CPU. */
+  209:  
+  210:    (void) pktLen;
+  211:  
+  212:    /* Note that the information in maZtcFmtTwoArrayPtrsTable[] describes */
+  213:    /* the message header. The layout of the packet header must be inferred. */
+  214:    FLib_MemCpy(&fmtInfo,
+  215:                (void *) &(maZtcFmtLenCodeAndPtrTable[fmtParametersIndex]),
+  216:                sizeof(fmtInfo));
+  217:  
+  218:    pCodeAndLenTable = fmtInfo.pCodeAndLenTable;
+  219:    code = pPkt[fmtInfo.offsetToLenCode];
+  220:    for (elementLen = (index_t) gMinusOne_c, i = 0; i < fmtInfo.codeAndLenTableLen; i++) {
+  221:      if (code == pCodeAndLenTable[i].code) {
+  222:        elementLen = pCodeAndLenTable[i].len;
+  223:      }
+  224:    }
+  225:  
+  226:    /* If the number of elements entry in the secondary format table is -1, */
+  227:    /* this format actually only has one array element, not a variable number */
+  228:    /* of them. */
+  229:    offsetToCount = fmtInfo.offsetToCount;
+  230:    numberOfArrayElements = 1;
+  231:    if (offsetToCount != (index_t) gMinusOne_c) {
+  232:      numberOfArrayElements = pPkt[offsetToCount];
+  233:    }
+  234:  
+  235:    offsetToMsgArray = fmtInfo.offsetToMsgData;
+  236:    arrayLen = elementLen * numberOfArrayElements;
+  237:    totalDstLen = offsetToMsgArray + arrayLen;
+  238:  
+  239:    if (elementLen == (index_t) gMinusOne_c) {
+  240:      ZtcError(gZtcUnknownPIB_c);
+  241:      return gTooBig_c;
+  242:    }
+  243:  
+  244:    if (totalDstLen > msgLen) {
+  245:      return gTooBig_c;
+  246:    }
+  247:  
+  248:    hdrTotalLen = fmtInfo.hdrLen;
+  249:    hdrFirstPartLen = fmtInfo.offsetToPtr;
+  250:  
+  251:    if (hdrFirstPartLen == (index_t) gMinusOne_c) {
+  252:      /* The header does not contain a pointer. */
+  253:      hdrFirstPartLen = hdrTotalLen;
+  254:    } else {
+  255:      /* Write the pointer. */
+  256:      *((uint8_t **)(pMsg + hdrFirstPartLen)) = pMsg + offsetToMsgArray;
+  257:  
+  258:      /* Copy the second part of the header. */
+  259:      FLib_MemCpy(pMsg + hdrFirstPartLen + sizeofPointer,
+  260:                  (void *) (pPkt + hdrFirstPartLen),
+  261:                  hdrTotalLen - hdrFirstPartLen - sizeofPointer);
+  262:    }                                     /* if (hdrFirstPartLen == ... */
+  263:  
+  264:    /* Copy the first part of the header, not including the pointer. */
+  265:    FLib_MemCpy(pMsg, (void *) pPkt, hdrFirstPartLen);
+  266:  
+  267:    /* Copy the array. */
+  268:    FLib_MemCpy(pMsg + offsetToMsgArray,
+  269:                (void *) (pPkt + hdrFirstPartLen),
+  270:                (index_t) arrayLen);
+  271:  
+  272:    return totalDstLen;
+  273:  }                                       /* ZtcMsgFromLenCodeAndPtr() */
+  274:  #endif                                  /* #if mZtcLenCodeAndPtrFormat_d */
+  275:  
+  276:  /****************************************************************************/
+  277:  
+  278:  /* Placeholder function to fill in the Fmt() table slot for message formats
+  279:   * that don't require message-from-packet copying.
+  280:   */
+  281:  index_t ZtcMsgFromPktUnused
+  282:    (
+  283:    uint8_t *pMsg,
+  284:    index_t msgLen,
+  285:    uint8_t *pPkt,
+  286:    index_t pktLen,
+  287:    index_t fmtParametersIndex
+  288:    )
+  289:  {
+  290:    /* Keep the compiler happy. */
+  291:    (void) pMsg;
+  292:    (void) msgLen;
+  293:    (void) pPkt;
+  294:    (void) pktLen;
+  295:    (void) fmtParametersIndex;
+  296:  
+  297:    return gTooBig_c;
+  298:  }                                       /* ZtcMsgFromPktUnused() */
+  299:   
+  300:  
+  301:  /****************************************************************************/
+  302:  
+  303:  /* The message consists of a header that contains two pointers to arrays.
+  304:   * Each array is described by a pointer to the data, plus a count of the
+  305:   * number of elements in the array. The sizes of the elements in each array
+  306:   * are constant, but the size of the elements of the first array is is
+  307:   * generally different than the size of the elements of the second array.
+  308:   *
+  309:   * The header has a first part (before the first array pointer), a second
+  310:   * part (between the first and second array pointers), and a third part
+  311:   * (after the second array pointer).
+  312:   *
+  313:   * This format is also used if there is only one array and pointer, instead
+  314:   * of two.
+  315:   *
+  316:   * The packet format is similar to the message, but the pointers are replaced
+  317:   * by the data of the arrays.
+  318:   *
+  319:   * Copy the data to a fixed offset relative to the beginning of the message
+  320:   * (at ztcFmtPtrToArray_t.offsetToMsgData). Copy the struct from the packet
+  321:   * to the message, inserting the pointers to the destination arrays at the
+  322:   * needed places.
+  323:   *
+  324:   * *warning* The number-of-elements fields *must* occur earlier in the
+  325:   * header than the corresponding pointers.
+  326:   *
+  327:   * The source packet looks like:
+  328:   *
+  329:   *  | F | 1 | M | 2 | L |
+  330:   *    ^   ^   ^   ^   ^
+  331:   *    :   :   :   :   +---- Third part of header.
+  332:   *    :   :   :   +-------- Contents of second array.
+  333:   *    :   :   +------------ Second part of header.
+  334:   *    :   +---------------- Contents of first array.
+  335:   *    +-------------------- First part of header.
+  336:   *
+  337:   * The field that specifies the number of element in the first array
+  338:   * must be in the first part of the header.
+  339:   * The field that specifies the number of elements in the second array
+  340:   * may be in either the first or second parts of the header.
+  341:   *
+  342:   * The destination message looks like:
+  343:   *
+  344:   *  | F | P | M | Q | L | G | 1 | 2 |
+  345:   *    ^   ^   ^   ^   ^   ^   ^   ^
+  346:   *    :   :   :   :   :   :   :   +---- Second array data.
+  347:   *    :   :   :   :   :   :   +-------- First array data.
+  348:   *    :   :   :   :   :   +------------ Gap.
+  349:   *    :   :   :   :   +---------------- Third part of header.
+  350:   *    :   :   :   +-------------------- Pointer to second array.
+  351:   *    :   :   +------------------------ Second part of header.
+  352:   *    :   +---------------------------- Pointer to first array.
+  353:   *    +-------------------------------- First part of header.
+  354:   *
+  355:   */
+  356:  index_t ZtcMsgFromPktTwoArrayPtrs
+  357:    (
+  358:    uint8_t *pMsg,                        /* Pointer to message payload. */
+  359:    index_t msgLen,                       /* Length  of message payload. */
+  360:    uint8_t *pPkt,                        /* Pointer to packet  payload. */
+  361:    index_t pktLen,                       /* Length  of packet  payload. */
+  362:    index_t fmtParametersIndex
+  363:    )
+  364:  {
+  365:    ztcFmtTwoArrayPtrs_t fmtInfo;
+  366:  
+  367:    /* The first, second, and third parts of the message and packet headers */
+  368:    /* are identical. The arrays are identical, although they are at different */
+  369:    /* offsets in the message and packet formats. */
+  370:    index_t hdrFirstPartLen;
+  371:    index_t hdrSecondPartLen;
+  372:    index_t hdrThirdPartLen;
+  373:    index_t array1Len;
+  374:    index_t array2Len;
+  375:  
+  376:    index_t offsetToMsgHdrSecondPart;
+  377:    index_t offsetToMsgHdrThirdPart;
+  378:    index_t offsetToMsgArray1;
+  379:    index_t offsetToMsgArray2;
+  380:  
+  381:    index_t offsetToMsgPtr2;
+  382:  
+  383:    index_t offsetToPktNumberOfArray2Elements;
+  384:  
+  385:    index_t offsetToPktHdrSecondPart;
+  386:    index_t offsetToPktHdrThirdPart;
+  387:    index_t offsetToPktArray2;
+  388:  
+  389:    index_t totalDstLen;
+  390:  
+  391:    (void) pktLen;
+  392:  
+  393:    /* Note that the information in maZtcFmtTwoArrayPtrsTable[] describes */
+  394:    /* the message header. The layout of the packet header must be inferred. */
+  395:    FLib_MemCpy(&fmtInfo,
+  396:                (void *) &(maZtcFmtTwoArrayPtrsTable[fmtParametersIndex]),
+  397:                sizeof(fmtInfo));
+  398:  
+  399:    hdrFirstPartLen = fmtInfo.offsetToPtr1;
+  400:  
+  401:    array1Len = pPkt[fmtInfo.offsetToNumberOfArray1Elements]
+  402:                * fmtInfo.sizeofArray1Element;
+  403:  
+  404:    /* In the message header, the second part of the header begins after the */
+  405:    /* first pointer. */
+  406:    offsetToMsgHdrSecondPart = hdrFirstPartLen + sizeofPointer;
+  407:  
+  408:    /* The packet header does not contain the pointers. The second part of */
+  409:    /* the packet header begins after the first array. */
+  410:    offsetToPktHdrSecondPart = hdrFirstPartLen + array1Len;
+  411:  
+  412:    /* In the message header, the first array is stored at a fixed offset */
+  413:    /* relative to the beginning of the header. */
+  414:    offsetToMsgArray1 = fmtInfo.offsetToMsgData;
+  415:  
+  416:    /* If there are two pointers, the second one cannot be at offset 0. */
+  417:    offsetToMsgPtr2 = fmtInfo.offsetToPtr2;
+  418:    if (!offsetToMsgPtr2) {
+  419:      /* There is only one array. */
+  420:  
+  421:      /* The second part of the header is the last part of the header. */
+  422:      hdrSecondPartLen = fmtInfo.hdrLen - offsetToMsgHdrSecondPart;
+  423:  
+  424:      /* because the first pointer is replaced by the first array, from the*/
+  425:      /* total length of the packet (totalDstLen) must be subtracted sizeofPointer bytes */    
+  426:      totalDstLen = offsetToMsgArray1 + array1Len - sizeofPointer;
+  427:    } else {
+  428:      /* There are two arrays. */
+  429:  
+  430:      /* The second part of the header ends at the second pointer. */
+  431:      hdrSecondPartLen = offsetToMsgPtr2 - offsetToMsgHdrSecondPart;
+  432:  
+  433:      /* In the packet, the first pointer is replaced by the first array, */
+  434:      /* shifting the position of the second part of the header. If the */
+  435:      /* number-of-elements field for the second array is in the second part */
+  436:      /* of the header, allow for that displacement. */
+  437:      offsetToPktNumberOfArray2Elements = fmtInfo.offsetToNumberOfArray2Elements;
+  438:      if (offsetToPktNumberOfArray2Elements >= offsetToMsgHdrSecondPart) {
+  439:        offsetToPktNumberOfArray2Elements += array1Len - sizeofPointer;
+  440:      }
+  441:  
+  442:      /* The message header contains a pointer to the first array. The packet */
+  443:      /* header does not contain the array pointers. */
+  444:      array2Len = pPkt[offsetToPktNumberOfArray2Elements]
+  445:                * fmtInfo.sizeofArray2Element;
+  446:  
+  447:      offsetToMsgArray2 = offsetToMsgArray1 + array1Len;
+  448:      /* because the first pointer is replaced by the first array and */
+  449:      /* the second pointer is replaced by the second array, from the */
+  450:      /* total length of the packet (totalDstLen) must be subtracted 2*sizeofPointer bytes */    
+  451:      totalDstLen       = offsetToMsgArray2 + array2Len - (2*sizeofPointer);
+  452:    }
+  453:  
+  454:    if (totalDstLen > msgLen) {
+  455:      return gTooBig_c;
+  456:    }
+  457:  
+  458:    /* Copy the first part of the header, up to the pointer. */
+  459:    FLib_MemCpy(pMsg, (void *) pPkt, hdrFirstPartLen);
+  460:  
+  461:    /* Write the first array pointer. */
+  462:    *((uint8_t **)(pMsg + hdrFirstPartLen)) = (pMsg + offsetToMsgArray1);
+  463:  
+  464:    /* Copy the second part of the header. */
+  465:    FLib_MemCpy((pMsg + offsetToMsgHdrSecondPart),
+  466:                (void *) (pPkt + offsetToPktHdrSecondPart),
+  467:                hdrSecondPartLen);
+  468:  
+  469:    /* If the elements of the second array are zero length, there is no */
+  470:    /* second array. */
+  471:    if (fmtInfo.sizeofArray2Element) {
+  472:      offsetToPktArray2         = offsetToPktHdrSecondPart + hdrSecondPartLen;
+  473:      offsetToMsgHdrThirdPart   = offsetToMsgPtr2 + sizeofPointer;
+  474:      offsetToPktHdrThirdPart   = offsetToPktArray2 + array2Len;
+  475:      hdrThirdPartLen           = fmtInfo.hdrLen - offsetToMsgPtr2 - sizeofPointer;
+  476:  
+  477:      /* Write the second array pointer. */
+  478:      *((uint8_t **)(pMsg + offsetToMsgPtr2)) = (pMsg + offsetToMsgArray2);
+  479:  
+  480:      /* Copy the third part of the header. */
+  481:      FLib_MemCpy((pMsg + offsetToMsgHdrThirdPart),
+  482:                  (void *) (pPkt + offsetToPktHdrThirdPart),
+  483:                  hdrThirdPartLen);
+  484:  
+  485:      /* Copy the second array. */
+  486:      FLib_MemCpy((pMsg + offsetToMsgArray2), (void *) (pPkt + offsetToPktArray2), array2Len);
+  487:    }
+  488:  
+  489:    /* Copy the first array. */
+  490:    FLib_MemCpy((pMsg + offsetToMsgArray1), (void *) (pPkt + hdrFirstPartLen  ), array1Len);
+  491:  
+  492:    return totalDstLen;
+  493:  }                                       /* ZtcMsgFromPktTwoArrayPtrs() */
+  494:  
+  495:  /****************************************************************************/
+  496:  
+  497:  /* The packet contains a fixed length header, which is copied unchanged to
+  498:   * the message.
+  499:   *
+  500:   * Source packet:
+  501:   *  | H |
+  502:   *
+  503:   * Destination message:
+  504:   *  | H |
+  505:   */
+  506:  index_t ZtcMsgFromPktSimple
+  507:    (
+  508:    uint8_t *pMsg,
+  509:    index_t msgLen,
+  510:    uint8_t *pPkt,
+  511:    index_t pktLen,
+  512:    index_t fmtParametersIndex
+  513:    )
+  514:  {
+  515:    (void) fmtParametersIndex;          /* Keep the compiler happy. */
+  516:  
+  517:    if (pktLen > msgLen) {
+  518:      return gTooBig_c;
+  519:    }
+  520:  
+  521:    FLib_MemCpy(pMsg, (void *) pPkt, pktLen);
+  522:    return pktLen;
+  523:  }                                       /* ZtcMsgFromPktSimple() */
+  524:  
+  525:  
+  526:  /****************************************************************************/
+  527:  
+  528:  /* The message contains a header and data. The header contains a pointer to
+  529:   * an array of fixed length elements, and the number of elements, and a code
+  530:   * value that can be looked up ina table to get the length of the elements.
+  531:   *
+  532:   * There are some messages that use the length code approach, but that have
+  533:   * either a simgle data value instead of an array, and/or that have no pointer
+  534:   * (the data is immediately after the header). The secondary format table,
+  535:   * maZtcFmtLenCodeAndPtrTable[], may contain special values (-1) for the
+  536:   * offset-to-number-of-elements and/or offset-to-pointer fields to indicate
+  537:   * these exceptions.
+  538:   *
+  539:   * In packet-from-message copies using the format, the field in the message
+  540:   * header that contains a pointer is replaced by a length field in the
+  541:   * packet header immediately followed by the array data.
+  542:   *
+  543:   * Copy the message header to the packet header. Look up the code in the
+  544:   * code-and-length table. THe Test Tool cannot do arithmetic, so it
+  545:   * cannot multiply the number of elements times the size of the elements to
+  546:   * find the total data length. Do the multiplication, and store the result
+  547:   * as a 16 bit value in the location where the message header's pointer is.
+  548:   * Copy the data pointed to by the message header to immediately after the
+  549:   * packet header.
+  550:   *
+  551:   * The offsetToMsgData field in the format parameter table is ignored in
+  552:   * packet-from-message copies.
+  553:   *
+  554:   * Source message:
+  555:   *  | F | P | S | G | A |
+  556:   *    ^   ^   ^   ^   ^
+  557:   *    |   |   |   |   +-- Variable length array.
+  558:   *    |   |   |   +------ Gap between pointer and data. May be any length.
+  559:   *    |   |   +---------- Second (and last) part of header.
+  560:   *    |   +-------------- Pointer to "A".
+  561:   *    +------------------ First part of header.
+  562:   *
+  563:   * Destination packet:
+  564:   *  | F | L | A | S |
+  565:   *    ^   ^    ^   ^
+  566:   *    |   |   |   +-- Second (and last) part of header.
+  567:   *    |   |   +------ Variable length array.
+  568:   *    |   +---------- Length of the array in bytes (16 bits).
+  569:   *    +-------------- First part of header, including:
+  570:   *                    a length code field, and
+  571:   *                    a count of the number of elements in the array.
+  572:   */
+  573:  #if mZtcLenCodeAndPtrFormat_d
+  574:  index_t ZtcPktFromMsgLenCodeAndPtr
+  575:    (
+  576:    uint8_t *pPkt,
+  577:    index_t pktLen,
+  578:    uint8_t *pMsg,
+  579:    index_t msgLen,
+  580:    index_t fmtParametersIndex
+  581:    )
+  582:  {
+  583:    index_t arrayLen;                     /* Risky on an 8 bit CPU. */
+  584:    index_t code;
+  585:    ztcFmtLenCodeAndPtr_t fmtInfo;
+  586:    index_t elementLen;
+  587:    index_t hdrTotalLen;
+  588:    index_t hdrFirstPartLen;
+  589:    index_t i;
+  590:    index_t numberOfArrayElements;
+  591:    index_t offsetToCount;
+  592:    ztcCodeAndLen_t const *pCodeAndLenTable;
+  593:    uint8_t const *pMsgData;
+  594:    index_t totalDstLen;                  /* Risky on an 8 bit CPU. */
+  595:  
+  596:    (void) msgLen;
+  597:  
+  598:    /* Note that the information in maZtcFmtTwoArrayPtrsTable[] describes */
+  599:    /* the message header. The layout of the packet header must be inferred. */
+  600:    FLib_MemCpy(&fmtInfo,
+  601:                (void *) &(maZtcFmtLenCodeAndPtrTable[fmtParametersIndex]),
+  602:                sizeof(fmtInfo));
+  603:    hdrTotalLen = fmtInfo.hdrLen;
+  604:  
+  605:    pCodeAndLenTable = fmtInfo.pCodeAndLenTable;
+  606:    code = pMsg[fmtInfo.offsetToLenCode];
+  607:    for (elementLen = (index_t) gMinusOne_c, i = 0; i < fmtInfo.codeAndLenTableLen; i++) {
+  608:      if (code == pCodeAndLenTable[i].code) {
+  609:        elementLen = pCodeAndLenTable[i].len;
+  610:      }
+  611:    }
+  612:  
+  613:    /* If the number of elements entry in the secondary format table is -1, */
+  614:    /* this format actually only has one array element, not a variable number */
+  615:    /* of them. */
+  616:    offsetToCount = fmtInfo.offsetToCount;
+  617:    numberOfArrayElements = 1;
+  618:    if (offsetToCount != (index_t) gMinusOne_c) {
+  619:      numberOfArrayElements = pMsg[offsetToCount];
+  620:    }
+  621:    arrayLen = elementLen * numberOfArrayElements;
+  622:    totalDstLen = hdrTotalLen + arrayLen;
+  623:  
+  624:    if (elementLen == (index_t) gMinusOne_c) {
+  625:      ZtcError(gZtcUnknownPIB_c);
+  626:    }
+  627:  
+  628:    if (totalDstLen > pktLen) {
+  629:      return gTooBig_c;
+  630:    }
+  631:  
+  632:    hdrFirstPartLen = fmtInfo.offsetToPtr;
+  633:    if (hdrFirstPartLen == (index_t) gMinusOne_c) {
+  634:      /* There is no pointer / length field. */
+  635:      hdrFirstPartLen = hdrTotalLen;
+  636:      pMsgData = pMsg + hdrTotalLen;
+  637:    } else {
+  638:      /* Store the length of the array. */
+  639:      /* *warning* This is brittle; it really should be a named typedef */
+  640:      /* instead of uint16_t. In the message this field is a pointer; in */
+  641:      /* the packet, its a length. Should be a union. Also has to agree */
+  642:      /* with the Test Tool. */
+  643:      *((uint16_t *) (pPkt + hdrFirstPartLen)) = Swap2Bytes((uint16_t)arrayLen);
+  644:  
+  645:      /* Copy the second part of the header. */
+  646:      FLib_MemCpy(pPkt + hdrFirstPartLen + sizeofPointer + arrayLen,
+  647:                  (void *) (pMsg + hdrFirstPartLen + sizeofPointer),
+  648:                  hdrTotalLen - hdrFirstPartLen - sizeofPointer);
+  649:  
+  650:      pMsgData = *((uint8_t **) (pMsg + hdrFirstPartLen));
+  651:    }
+  652:  
+  653:    /* Copy the first part of the header. */
+  654:    FLib_MemCpy(pPkt, (void *) pMsg, hdrFirstPartLen);
+  655:  
+  656:    /* Copy the data. */
+  657:    FLib_MemCpy(pPkt + hdrTotalLen, (void *) pMsgData, arrayLen);
+  658:  
+  659:    return totalDstLen;
+  660:  }                                       /* ZtcPktFromMsgLenCodeAndPtr() */
+  661:  #endif                                  /* #if mZtcLenCodeAndPtrFormat_d */
+  662:  
+  663:  /****************************************************************************/
+  664:  
+  665:  /* See the comments for ZtcMsgFromPktTwoArrayPtrs().
+  666:   *
+  667:   * The source message looks like:
+  668:   *
+  669:   *  | F | P | M | Q | L | G | 1 | 2 |
+  670:   *    ^   ^   ^   ^   ^   ^   ^   ^
+  671:   *    :   :   :   :   :   :   :   +---- Second array data.
+  672:   *    :   :   :   :   :   :   +-------- First array data.
+  673:   *    :   :   :   :   :   +------------ Gap.
+  674:   *    :   :   :   :   +---------------- Third part of header.
+  675:   *    :   :   :   +-------------------- Pointer to second array.
+  676:   *    :   :   +------------------------ Second part of header.
+  677:   *    :   +---------------------------- Pointer to first array.
+  678:   *    +-------------------------------- First part of header.
+  679:   *
+  680:   * The field that specifies the number of element in the first array
+  681:   * must be in the first part of the header.
+  682:   * The field that specifies the number of elements in the second array
+  683:   * may be in either the first or second parts of the header.
+  684:   *
+  685:   * The destination packet looks like:
+  686:   *
+  687:   *  | F | 1 | M | 2 | L |
+  688:   *    ^   ^   ^   ^   ^
+  689:   *    :   :   :   :   +---- Third part of header.
+  690:   *    :   :   :   +-------- Contents of second array.
+  691:   *    :   :   +------------ Second part of header.
+  692:   *    :   +---------------- Contents of first array
+  693:   *    +-------------------- First part of header.
+  694:   *
+  695:   * The field that specifies the number of elements in the second array may
+  696:   * be in either the first or second part of the header.
+  697:   */
+  698:  index_t ZtcPktFromMsgTwoArrayPtrs
+  699:    (
+  700:    uint8_t *pPkt,
+  701:    index_t pktLen,
+  702:    uint8_t *pMsg,
+  703:    index_t msgLen,
+  704:    index_t fmtParametersIndex
+  705:    )
+  706:  {
+  707:    ztcFmtTwoArrayPtrs_t fmtInfo;
+  708:  
+  709:    index_t array1Len;                    /* Risky on an 8 bit CPU. */
+  710:    index_t array2Len;                    /* Risky on an 8 bit CPU. */
+  711:  
+  712:    /* The first, second, and third parts of the msg and pkt headers are */
+  713:    /* identical. */
+  714:    index_t hdrLen;
+  715:    index_t hdrSecondPartLen;
+  716:    index_t hdrThirdPartLen;
+  717:  
+  718:    index_t offsetToMsgHdrPtr1;
+  719:    index_t offsetToMsgHdrSecondPart;
+  720:    index_t offsetToMsgHdrPtr2;
+  721:    index_t offsetToMsgHdrThirdPart;
+  722:  
+  723:    uint8_t *pPktArray1;
+  724:    uint8_t *pPktHdrSecondPart;
+  725:    uint8_t *pPktArray2;
+  726:    uint8_t *pPktHdrThirdPart;
+  727:  
+  728:    uint8_t **pMsgHdrPtrToArray1;
+  729:    uint8_t **pMsgHdrPtrToArray2;
+  730:  
+  731:    uint8_t *pMsgArray1;
+  732:    uint8_t *pMsgArray2;
+  733:    index_t totalDstLen;                  /* Risky on an 8 bit CPU. */
+  734:  
+  735:    (void) msgLen;
+  736:  
+  737:    /* Note that the information in maZtcFmtTwoArrayPtrsTable[] describes */
+  738:    /* the message header. The layout of the packet header must be inferred. */
+  739:    FLib_MemCpy(&fmtInfo,
+  740:                (void *) &(maZtcFmtTwoArrayPtrsTable[fmtParametersIndex]),
+  741:                sizeof(fmtInfo));
+  742:  
+  743:    array1Len = pMsg[fmtInfo.offsetToNumberOfArray1Elements]
+  744:              * fmtInfo.sizeofArray1Element;
+  745:  
+  746:    /* If there is only one array, sizeofArray2Element will be == 0, and so */
+  747:    /* array2Len will be == 0. */
+  748:    array2Len = pMsg[fmtInfo.offsetToNumberOfArray2Elements]
+  749:              * fmtInfo.sizeofArray2Element;
+  750:  
+  751:    hdrLen                    = fmtInfo.hdrLen;
+  752:    offsetToMsgHdrPtr1        = fmtInfo.offsetToPtr1;
+  753:  
+  754:    /* If there is only one array, there is no second pointer, and the header */
+  755:    /* only has two parts (first and second, with no third part). Use the total */
+  756:    /* size of the header to compute the length of the second part. */
+  757:    offsetToMsgHdrPtr2        = fmtInfo.offsetToPtr2;
+  758:    if (!offsetToMsgHdrPtr2) {
+  759:      offsetToMsgHdrPtr2 = hdrLen;
+  760:    }
+  761:  
+  762:    offsetToMsgHdrSecondPart  = offsetToMsgHdrPtr1 + sizeofPointer;
+  763:    hdrSecondPartLen          = offsetToMsgHdrPtr2 - offsetToMsgHdrSecondPart;
+  764:  
+  765:    pPktArray1                = pPkt + offsetToMsgHdrPtr1;
+  766:    pPktHdrSecondPart         = pPktArray1 + array1Len;
+  767:  
+  768:    pMsgHdrPtrToArray1        = (uint8_t **) (pMsg + offsetToMsgHdrPtr1);
+  769:  
+  770:    pMsgArray1                = *pMsgHdrPtrToArray1;
+  771:  
+  772:    /* The message version has either one or two pointers. The packet version */
+  773:    /* has no pointer (the arrays take the place of the pointers). */
+  774:    totalDstLen               = hdrLen + array1Len - sizeofPointer;
+  775:    if (fmtInfo.sizeofArray2Element) {
+  776:      totalDstLen += array2Len - sizeofPointer;   /* Allow for the 2nd array. */
+  777:    }
+  778:  
+  779:    if (totalDstLen > pktLen) {
+  780:      return gTooBig_c;
+  781:    }
+  782:  
+  783:    /* Copy the beginning of the header. */
+  784:    FLib_MemCpy(pPkt, (void *) pMsg, offsetToMsgHdrPtr1);
+  785:  
+  786:    /* Copy the data for the first array. */
+  787:    FLib_MemCpy(pPktArray1, (void *) pMsgArray1, array1Len);
+  788:  
+  789:    /* Copy the second of the header, between the pointers. */
+  790:    FLib_MemCpy(pPktHdrSecondPart,
+  791:                (void *) (pMsg + offsetToMsgHdrSecondPart),
+  792:                hdrSecondPartLen);
+  793:  
+  794:    /* If the elements of the second array are zero length, there is no */
+  795:    /* second array. */
+  796:    if (fmtInfo.sizeofArray2Element) {
+  797:      offsetToMsgHdrThirdPart   = offsetToMsgHdrPtr2 + sizeofPointer;
+  798:      hdrThirdPartLen           = hdrLen - offsetToMsgHdrThirdPart;
+  799:  
+  800:      pPktArray2                = pPktHdrSecondPart + hdrSecondPartLen;
+  801:      pPktHdrThirdPart          = pPktArray2 + array2Len;
+  802:      pMsgHdrPtrToArray2        = (uint8_t **) (pMsg + offsetToMsgHdrPtr2);
+  803:      pMsgArray2                = *pMsgHdrPtrToArray2;
+  804:  
+  805:      /* Copy the data for the second array. */
+  806:      FLib_MemCpy(pPktArray2, (void *) pMsgArray2, array2Len);
+  807:  
+  808:      /* Copy the remainder of the header. */
+  809:      FLib_MemCpy(pPktHdrThirdPart,
+  810:                  (void *) (pMsg + offsetToMsgHdrThirdPart),
+  811:                  hdrThirdPartLen);
+  812:    }
+  813:  
+  814:    return totalDstLen;
+  815:  }                                       /* ZtcPktFromMsgTwoArrayPtrs() */
+  816:  
+  817:  /****************************************************************************/
+  818:  
+  819:  /* The packet contains a fixed length header, which is copied unchanged to
+  820:   * the message.
+  821:   *
+  822:   * Source message
+  823:   *  | H |
+  824:   *
+  825:   * Destination packet:
+  826:   *  | H |
+  827:   */
+  828:  index_t ZtcPktFromMsgSimple
+  829:    (
+  830:    uint8_t *pPkt,
+  831:    index_t pktLen,
+  832:    uint8_t *pMsg,
+  833:    index_t msgLen,
+  834:    index_t fmtParametersIndex
+  835:    )
+  836:  {
+  837:    (void) fmtParametersIndex;
+  838:  
+  839:    if (pktLen < msgLen) {
+  840:      return gTooBig_c;
+  841:    }
+  842:  
+  843:    FLib_MemCpy(pPkt, (void *) pMsg, msgLen);
+  844:    return msgLen;
+  845:  }                                       /* ZtcPktFromMsgSimple() */
+  846:  
+  847:  /****************************************************************************/
+  848:  
+  849:  /* Placeholder function to fill in the Fmt() table slot for message formats
+  850:   * that don't require packet-from-message copying.
+  851:   */
+  852:  index_t ZtcPktFromMsgUnused
+  853:    (
+  854:    uint8_t *pPkt,
+  855:    index_t pktLen,
+  856:    uint8_t *pMsg,
+  857:    index_t msgLen,
+  858:    index_t fmtParametersIndex
+  859:    )
+  860:  {
+  861:    /* Keep the compiler happy. */
+  862:    (void) pPkt;
+  863:    (void) pktLen;
+  864:    (void) pMsg;
+  865:    (void) msgLen;
+  866:    (void) fmtParametersIndex;
+  867:  
+  868:    return gTooBig_c;
+  869:  }                                       /* ZtcPktFromMsgUnused() */
+  870:  
+  871:  
+  872:  /****************************************************************************/
+  873:  /* Custom function for copying MAC BeaconNotifyIndication from MLME message
+  874:   * to ZTC packet. It is needed because the BeaconNotifyInd frame does not
+  875:   * have a format that can be applied to other data copy functions. 
+  876:   *
+  877:   * Source message:
+  878:   *  | BSN | PendAddrSpec | sduLength | *pAddrList | *pPanDescriptor | pSdu |
+  879:   *
+  880:   * Destination packet:
+  881:   *  | BSN | PendAddrSpec | sduLength | AddrList | PanDescriptor | pSdu | 
+  882:   *
+  883:   */
+  884:  #if gSAPMessagesEnableMlme_d
+  885:  index_t ZtcPktFromMsgMacBeaconNotifyInd
+  886:    (
+  887:    uint8_t *pPkt,
+  888:    index_t pktLen,
+  889:    uint8_t *pMsg,
+  890:    index_t msgLen,
+  891:    index_t fmtParametersIndex
+  892:    )
+  893:  {
+  894:    index_t currentLen;
+  895:    index_t totalDstLen;  
+  896:    index_t addrLen;
+  897:  
+  898:    /* Apply a beacon notify structure pointer to the message buffer. */
+  899:    nwkBeaconNotifyInd_t *pMsgBeaconNotifyInd = (nwkBeaconNotifyInd_t *)pMsg;
+  900:    uint8_t pendAddrSpec = pMsgBeaconNotifyInd->pendAddrSpec;
+  901:    uint8_t sduLength = pMsgBeaconNotifyInd->sduLength;
+  902:    
+  903:    /* Get the short and extended address counts from the PendAddrSpec field. */
+  904:    /* 802.15.4 IEEE standard 7.2.2.1.6 */
+  905:    index_t shortAddrCnt = pendAddrSpec & 0x07;
+  906:    index_t extAddrCnt = (pendAddrSpec & 0x70) >> 4;
+  907:      
+  908:    (void) msgLen;
+  909:    (void) fmtParametersIndex;  
+  910:    
+  911:    /* Copy BSN */
+  912:    pPkt[0] = pMsgBeaconNotifyInd->bsn;
+  913:    /* Copy PendAddrSpec */
+  914:    pPkt[1] = pendAddrSpec;  
+  915:    /* Copy SDU length */
+  916:    pPkt[2] = sduLength;  
+  917:  
+  918:    /* Get the total length in bytes of the address list  */
+  919:    addrLen = (shortAddrCnt << 1) + (extAddrCnt << 3);
+  920:  
+  921:    /* Get total length of the ZTC packet  */
+  922:    totalDstLen = 3 + addrLen + sizeof(panDescriptor_t) + sduLength;
+  923:    
+  924:    if (totalDstLen > pktLen) {
+  925:      return gTooBig_c;
+  926:    }  
+  927:  
+  928:    /* Copy address list */
+  929:    FLib_MemCpy(&pPkt[3], pMsgBeaconNotifyInd->pAddrList, addrLen);  
+  930:    
+  931:    currentLen = addrLen + 3;
+  932:    
+  933:    /* Copy PanDescriptor from the pointer in Beacon Notify Structure */
+  934:    FLib_MemCpy(&pPkt[currentLen], pMsgBeaconNotifyInd->pPanDescriptor, 
+  935:                sizeof(panDescriptor_t));
+  936:    
+  937:    currentLen += sizeof(panDescriptor_t);
+  938:    
+  939:    /* Copy SDU */
+  940:    FLib_MemCpy(&pPkt[currentLen], pMsgBeaconNotifyInd->pSdu, sduLength);
+  941:    
+  942:    return totalDstLen;  
+  943:  }                                       /* ZtcPktFromMsgMacBeaconNotifyInd() */
+  944:  #endif                                  /* #if gSAPMessagesEnableMlme_d     */
+  945:  
+  946:  
+  947:  /****************************************************************************/
+  948:  /* The function saves the values specified in the channel list for each MAC 
+  949:   * Scan Request given from ZTC in the static maScanChannels so that the 
+  950:   * subsequent MAC Scan Confirm message from ZTC can be built correctly for 
+  951:   * an Energy Detect Scan Type. For this type of scan confirm, the list of 
+  952:   * energies should only contain the values given for the channels specifed
+  953:   * in the scan request, so we save the list of channels and retrieve it in
+  954:   * ZtcPktFromMsgMacScanCnf when building the list for the scan confirm.
+  955:   * The function acts a proxy for ZtcMsgFromPktSimple as its only role is 
+  956:   * to save the channel list and does not do actual data copying from pkt to
+  957:   * msg.
+  958:   */
+  959:  #if gSAPMessagesEnableMlme_d
+  960:  index_t ZtcMsgFromPktMacScanReq
+  961:  (
+  962:    uint8_t *pMsg,
+  963:    index_t msgLen,
+  964:    uint8_t *pPkt,
+  965:    index_t pktLen,
+  966:    index_t fmtParametersIndex
+  967:    )
+  968:  {
+  969:    mlmeScanReq_t *pPktScanReq;
+  970:    index_t result;
+  971:    pPktScanReq = (mlmeScanReq_t *)pPkt;
+  972:    
+  973:    /* Saving channel list in MAC Scan Request */
+  974:    maScanChannels[ 0 ] = pPktScanReq->scanChannels[ 0 ];
+  975:    maScanChannels[ 1 ] = pPktScanReq->scanChannels[ 1 ];
+  976:    maScanChannels[ 2 ] = pPktScanReq->scanChannels[ 2 ];
+  977:    maScanChannels[ 3 ] = pPktScanReq->scanChannels[ 3 ];
+  978:    
+  979:    /* Redirect packet to simple data copy function */
+  980:    result = ZtcMsgFromPktSimple(pMsg, msgLen, pPkt, pktLen, fmtParametersIndex);
+  981:    return result;
+  982:  }
+  983:  #endif                                  /* #if gSAPMessagesEnableMlme_d */
+  984:  
+  985:  #if gSAPMessagesEnableMlme_d
+  986:  index_t ZtcPktFromMsgMacScanReq
+  987:  (
+  988:    uint8_t *pMsg,
+  989:    index_t msgLen,
+  990:    uint8_t *pPkt,
+  991:    index_t pktLen,
+  992:    index_t fmtParametersIndex
+  993:    )
+  994:  {
+  995:    mlmeScanReq_t *pPktScanReq;
+  996:    index_t result;
+  997:    pPktScanReq = (mlmeScanReq_t *)pPkt;
+  998:   
+  999:    /* Saving channel list in MAC Scan Request */
+ 1000:    maScanChannels[ 0 ] = pPktScanReq->scanChannels[ 0 ];
+ 1001:    maScanChannels[ 1 ] = pPktScanReq->scanChannels[ 1 ];
+ 1002:    maScanChannels[ 2 ] = pPktScanReq->scanChannels[ 2 ];
+ 1003:    maScanChannels[ 3 ] = pPktScanReq->scanChannels[ 3 ];
+ 1004:    
+ 1005:    /* Redirect packet to simple data copy function */
+ 1006:    result = ZtcPktFromMsgSimple(pMsg, msgLen, pPkt, pktLen, fmtParametersIndex);
+ 1007:    return result;
+ 1008:  }
+ 1009:  #endif                                  /* #if gSAPMessagesEnableMlme_d */
+ 1010:  
+ 1011:  #if gSAPMessagesEnableInterPan_d
+ 1012:  index_t ZtcPktFromMsgInterPanDataReq
+ 1013:  (
+ 1014:    uint8_t *pMsg,
+ 1015:    index_t msgLen,
+ 1016:    uint8_t *pPkt,
+ 1017:    index_t pktLen,
+ 1018:    index_t fmtParametersIndex
+ 1019:    )
+ 1020:  {
+ 1021:    index_t result;
+ 1022:    
+ 1023:    /* Redirect packet to simple data copy function, but insure that the pasduhandle is not copied */
+ 1024:    msgLen = msgLen - MbrSizeof(zbInterPanDataReq_t, pAsduHandle);
+ 1025:    result = ZtcPktFromMsgTwoArrayPtrs(pMsg, msgLen, pPkt, pktLen, fmtParametersIndex);
+ 1026:    return result;
+ 1027:  }
+ 1028:  #endif                                  /* #if gSAPMessagesEnableInterPan_d */
+ 1029:  
+ 1030:  #if gSAPMessagesEnableInterPan_d
+ 1031:  index_t ZtcMsgFromPktInterPanDataReq
+ 1032:  (
+ 1033:    uint8_t *pMsg,
+ 1034:    index_t msgLen,
+ 1035:    uint8_t *pPkt,
+ 1036:    index_t pktLen,
+ 1037:    index_t fmtParametersIndex
+ 1038:    )
+ 1039:  {
+ 1040:    zbInterPanDataReq_t *pPktInterPanDataReq;
+ 1041:    index_t result;  
+ 1042:    pPktInterPanDataReq = (zbInterPanDataReq_t*)pMsg;
+ 1043:    
+ 1044:    result = ZtcMsgFromPktTwoArrayPtrs(pMsg, msgLen, pPkt, pktLen, fmtParametersIndex);
+ 1045:    /*Make sure that the msdu handle pointer is set to NULL*/
+ 1046:    pPktInterPanDataReq->pAsduHandle = NULL;  
+ 1047:    
+ 1048:    return result;
+ 1049:  }
+ 1050:  #endif                                  /* #if gSAPMessagesEnableInterPan_d */
+ 1051:  
+ 1052:  
+ 1053:  
+ 1054:  /****************************************************************************/
+ 1055:  /* Custom function for copying MAC Scan Confirmation from MLME message
+ 1056:   * to ZTC packet. It is needed because it uses the stored maScanChannels values
+ 1057:   * in order to identify which of the channels in the Energy Detect List
+ 1058:   * was returned in the confirmation message. 
+ 1059:   *
+ 1060:   */
+ 1061:  #if gSAPMessagesEnableMlme_d || gSAPMessagesEnableNlme_d
+ 1062:  index_t ZtcPktFromMsgMacScanCnf
+ 1063:    (
+ 1064:    uint8_t *pPkt,
+ 1065:    index_t pktLen,
+ 1066:    uint8_t *pMsg,
+ 1067:    index_t msgLen,
+ 1068:    index_t fmtParametersIndex
+ 1069:    )
+ 1070:  {
+ 1071:    index_t totalDstLen;                  /* Risky on 8 bit CPUs. */
+ 1072:    index_t scanType;
+ 1073:    index_t elementLen;
+ 1074:    index_t arrayLen;
+ 1075:    index_t hdrLen;
+ 1076:    nwkScanCnf_t *pMsgScanCnf;
+ 1077:    uint8_t iIndex = ByteOffset;	
+ 1078:    
+ 1079:    (void) msgLen;
+ 1080:    (void) fmtParametersIndex;  
+ 1081:  
+ 1082:    /* Apply a Scan Confirmation structure pointer to the message buffer. */
+ 1083:    pMsgScanCnf = (nwkScanCnf_t *)pMsg;
+ 1084:    
+ 1085:    /* Find out fixed number of bytes to the variable-sized list */
+ 1086:    hdrLen = MbrOfs(nwkScanCnf_t, resList);
+ 1087:    scanType = pMsgScanCnf->scanType;
+ 1088:  
+ 1089:    /* Get the element lenght of the result list which is 1 for ED */
+ 1090:    /*  and orphan scan and 22 for Active and Passive Scan types */
+ 1091:    elementLen = IndirectMbrSizeof(nwkScanCnf_t, resList.pEnergyDetectList);
+ 1092:    if ( scanType == gScanModeActive_c || scanType == gScanModePassive_c )
+ 1093:      elementLen = sizeof(panDescriptor_t);
+ 1094:    
+ 1095:    /* arrayLen holds the size of the variable result list */
+ 1096:    
+ 1097:    #if gZtcExtendedScanConfirmSupport_c
+ 1098:      arrayLen = pMsgScanCnf->resultListSize * elementLen;
+ 1099:    #else
+ 1100:      if(( scanType == gScanModeED_c) || ( scanType == gScanModeED_c) ||
+ 1101:        (( scanType == gScanModeActive_c || scanType == gScanModePassive_c )&&
+ 1102:         (pMsgScanCnf->resultListSize <= aScanResultsPerBlock)))
+ 1103:      {
+ 1104:         arrayLen = pMsgScanCnf->resultListSize * elementLen;
+ 1105:      }    
+ 1106:      else
+ 1107:      {
+ 1108:         arrayLen = elementLen*aScanResultsPerBlock;  
+ 1109:  
+ 1110:      }
+ 1111:    #endif
+ 1112:  
+ 1113:    totalDstLen = hdrLen + arrayLen;              
+ 1114:    
+ 1115:    if (totalDstLen > pktLen) {
+ 1116:      return gTooBig_c;
+ 1117:    }  
+ 1118:  
+ 1119:    /* copy the bytes from before the variable result list */  
+ 1120:    FLib_MemCpy(pPkt, (void *) pMsg, hdrLen );
+ 1121:    
+ 1122:      
+ 1123:    /* if the MAC scan was an energy detect, we retrieve the channels */  
+ 1124:    /* scanned from maScanChannels and copy only those energy values */  
+ 1125:    /* from the global buffer to the ZTC packet */
+ 1126:     if(scanType == gScanModeED_c)
+ 1127:     {
+ 1128:      if(pMsgScanCnf->resultListSize != 0)
+ 1129:      {
+ 1130:       uint8_t *pEdList = pMsgScanCnf->resList.pEnergyDetectList;
+ 1131:       uint8_t *pCurrentArrayIdx = pPkt + hdrLen;
+ 1132:  
+ 1133:       for(iIndex = 0; iIndex < (pMsgScanCnf->resultListSize); iIndex++) {
+ 1134:        *pCurrentArrayIdx = pEdList[iIndex];
+ 1135:        pCurrentArrayIdx++;
+ 1136:       }
+ 1137:       
+ 1138:      }
+ 1139:     } 
+ 1140:     /* any other kind of MAC scan */  
+ 1141:     else 
+ 1142:     {            
+ 1143:      if(pMsgScanCnf->resultListSize <= aScanResultsPerBlock) 
+ 1144:      {
+ 1145:         FLib_MemCpy(pPkt + hdrLen, 
+ 1146:                    (void *) (&pMsgScanCnf->resList.pPanDescriptorBlocks->descriptorList), 
+ 1147:                    arrayLen);                                    
+ 1148:      } 
+ 1149:      else
+ 1150:      {  
+ 1151:         FLib_MemCpy(pPkt + hdrLen, 
+ 1152:                    (void *) (&pMsgScanCnf->resList.pPanDescriptorBlocks->descriptorList), 
+ 1153:                    (elementLen*aScanResultsPerBlock)); 
+ 1154:         #if gZtcExtendedScanConfirmSupport_c                  
+ 1155:            FLib_MemCpy(pPkt + hdrLen + elementLen*aScanResultsPerBlock + 1, 
+ 1156:                       (void *) (&pMsgScanCnf->resList.pPanDescriptorBlocks->pNext->descriptorList), 
+ 1157:                       (elementLen *(pMsgScanCnf->resultListSize-aScanResultsPerBlock)));                 
+ 1158:         #endif                
+ 1159:      }
+ 1160:                              
+ 1161:     }
+ 1162:    
+ 1163:    return totalDstLen;  
+ 1164:  }                                       /* ZtcPktFromMsgMacScanCnf() */
+ 1165:  #endif                                  /* #if gSAPMessagesEnableMlme_d */
+ 1166:  
+ 1167:  #endif                                  /* #if gZtcIncluded_d == 1 */
+ 1168:  

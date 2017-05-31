@@ -1,0 +1,179 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /******************************************************************************
+    2:  *  This file is to Initialize the entire MAC.
+    3:  *
+    4:  * (c) Copyright 2007, Freescale, Inc. All rights reserved.
+    5:  *
+    6:  *
+    7:  * No part of this document must be reproduced in any form - including copied,
+    8:  * transcribed, printed or by any electronic means - without specific written
+    9:  * permission from Freescale Semiconductor.
+   10:  *
+   11:  ******************************************************************************/
+   12:  
+   13:  #include "EmbeddedTypes.h"
+   14:  #include "MacInit.h"
+   15:  
+   16:  
+   17:  /******************************************************************************
+   18:  *******************************************************************************
+   19:  * Private macros
+   20:  *******************************************************************************
+   21:  ******************************************************************************/
+   22:  /* Number of elements in an array. */
+   23:  #define NumberOfElements(array)   ((sizeof(array) / (sizeof(array[0]))))
+   24:  
+   25:  /******************************************************************************
+   26:  *******************************************************************************
+   27:  * Private prototypes
+   28:  *******************************************************************************
+   29:  ******************************************************************************/
+   30:  
+   31:  void MacTaskInit(void);
+   32:  void TS_PlaceHolderTaskInit(void);
+   33:  
+   34:  /******************************************************************************
+   35:  *******************************************************************************
+   36:  * Private type definitions
+   37:  *******************************************************************************
+   38:  ******************************************************************************/
+   39:  
+   40:  typedef struct macTaskEntry_tag {
+   41:    tsTaskID_t *pTaskID;
+   42:    void (*pInitFunction)(void);
+   43:    void (*pEventHandler)(event_t);
+   44:    tsTaskPriority_t priority;
+   45:  } macTaskEntry_t;
+   46:  
+   47:  /******************************************************************************
+   48:  *******************************************************************************
+   49:  * Private memory declarations
+   50:  *******************************************************************************
+   51:  ******************************************************************************/
+   52:  
+   53:  #define Task(taskIdGlobal, taskInitFunc, taskMainFunc, priority) \
+   54:    { &taskIdGlobal, taskInitFunc, taskMainFunc, priority },
+   55:    
+   56:  macTaskEntry_t const MacTaskTable[] = {
+   57:  #include "MacTaskTbl.h"
+   58:  };
+   59:  
+   60:  /******************************************************************************
+   61:  *******************************************************************************
+   62:  * Public memory declarations
+   63:  *******************************************************************************
+   64:  ******************************************************************************/
+   65:  
+   66:  tsTaskID_t gMacTaskID_c;
+   67:  
+   68:  
+   69:  /******************************************************************************
+   70:  *******************************************************************************
+   71:  * Public functions
+   72:  *******************************************************************************
+   73:  ******************************************************************************/
+   74:  
+   75:  void MacInit(void) {
+   76:    MacTaskInit();
+  0000 ac000000 [8]             CALL  MacTaskInit
+   77:  }
+  0004 8d       [7]             RTC   
+   78:  
+   79:  /******************************************************************************
+   80:  *******************************************************************************
+   81:  * Private functions
+   82:  *******************************************************************************
+   83:  ******************************************************************************/
+   84:  
+   85:  /* This function can be used in the table in MacTaskTbl.h for any task */
+   86:  /* that does not have it's own init function. */
+   87:  void TS_PlaceHolderTaskInit(void) {
+   88:  }
+  0000 8d       [7]             RTC   
+   89:  
+   90:  /*****************************************************************************/
+   91:  
+   92:  /* Init the MAC task. Add all of them to the kernel's task table, and */
+   93:  /* call of the init functions. */
+   94:  void MacTaskInit(void) {
+  0000 a7fd     [2]             AIS   #-3
+   95:    index_t i;
+   96:  
+   97:    /* Add the tasks to the kernel's task table first. That way, if any of the */
+   98:    /* init functions want to set events, all of the task ids will be defined. */
+   99:    for (i = 0; i < NumberOfElements(MacTaskTable); ++i) {
+  0002 4f       [1]             CLRA  
+  0003          L3:     
+  100:      *MacTaskTable[i].pTaskID = TS_CreateTask(MacTaskTable[i].priority,
+  0003 ae09     [2]             LDX   #9
+  0005 9ee701   [4]             STA   1,SP
+  0008 42       [5]             MUL   
+  0009 89       [2]             PSHX  
+  000a 8a       [3]             PULH  
+  000b 97       [1]             TAX   
+  000c d60008   [4]             LDA   @MacTaskTable:8,X
+  000f 87       [2]             PSHA  
+  0010 9eff03   [5]             STHX  3,SP
+  0013 9ebe0006 [6]             LDHX  @MacTaskTable:6,X
+  0017 89       [2]             PSHX  
+  0018 8b       [2]             PSHH  
+  0019 9efe05   [5]             LDHX  5,SP
+  001c d60005   [4]             LDA   @MacTaskTable:5,X
+  001f 87       [2]             PSHA  
+  0020 ac000000 [8]             CALL  TS_CreateTask
+  0024 a704     [2]             AIS   #4
+  0026 9efe02   [5]             LDHX  2,SP
+  0029 9ebe0000 [6]             LDHX  @MacTaskTable,X
+  002d f7       [2]             STA   ,X
+  002e 95       [2]             TSX   
+  002f f6       [3]             LDA   ,X
+  0030 4c       [1]             INCA  
+  0031 a101     [2]             CMP   #1
+  0033 25ce     [3]             BCS   L3 ;abs = 0003
+  101:                                               MacTaskTable[i].pEventHandler);
+  102:    }
+  103:  
+  104:    for (i = 0; i < NumberOfElements(MacTaskTable); ++i) {
+  0035 4f       [1]             CLRA  
+  0036          L36:    
+  105:      (*MacTaskTable[i].pInitFunction)();
+  0036 ae09     [2]             LDX   #9
+  0038 87       [2]             PSHA  
+  0039 42       [5]             MUL   
+  003a 89       [2]             PSHX  
+  003b 8a       [3]             PULH  
+  003c 97       [1]             TAX   
+  003d 8b       [2]             PSHH  
+  003e 9ebe0003 [6]             LDHX  @MacTaskTable:3,X
+  0042 8b       [2]             PSHH  
+  0043 87       [2]             PSHA  
+  0044 9ee603   [4]             LDA   3,SP
+  0047 87       [2]             PSHA  
+  0048 8a       [3]             PULH  
+  0049 86       [3]             PULA  
+  004a 89       [2]             PSHX  
+  004b 97       [1]             TAX   
+  004c d60002   [4]             LDA   @MacTaskTable:2,X
+  004f 8b       [2]             PSHH  
+  0050 8b       [2]             PSHH  
+  0051 8b       [2]             PSHH  
+  0052 95       [2]             TSX   
+  0053 ee04     [3]             LDX   4,X
+  0055 89       [2]             PSHX  
+  0056 95       [2]             TSX   
+  0057 ee04     [3]             LDX   4,X
+  0059 8a       [3]             PULH  
+  005a ac000000 [8]             CALL  _CALL_STAR08_FAR
+  005e 95       [2]             TSX   
+  005f e603     [3]             LDA   3,X
+  0061 4c       [1]             INCA  
+  0062 a101     [2]             CMP   #1
+  0064 a704     [2]             AIS   #4
+  0066 25ce     [3]             BCS   L36 ;abs = 0036
+  106:    }
+  107:  }                                       /* MacTaskInit() */
+  0068 a703     [2]             AIS   #3
+  006a 8d       [7]             RTC   
+  108:  

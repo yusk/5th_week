@@ -1,0 +1,548 @@
+*** EVALUATION ***
+ANSI-C/cC++ Compiler for HC08 V-5.0.41 Build 12319, Nov 15 2012
+
+    1:  /************************************************************************************
+    2:  * MC1323X: Implements PD and PLME PHY primitives
+    3:  *
+    4:  * (c) Copyright 2009, Freescale, Inc.  All rights reserved.
+    5:  *
+    6:  * No part of this document must be reproduced in any form - including copied,
+    7:  * transcribed, printed or by any electronic means - without specific written
+    8:  * permission from Freescale Semiconductor.
+    9:  *
+   10:  ************************************************************************************/
+   11:  
+   12:  
+   13:  /************************************************************************************
+   14:  *************************************************************************************
+   15:  * Includes
+   16:  *************************************************************************************
+   17:  ************************************************************************************/
+   18:  #include "EmbeddedTypes.h"
+   19:  #include "IoConfig.h"
+   20:  
+   21:  #include "PhyDebugMC1323X.h"
+   22:  #include "PhyMC1323X.h"
+   23:  
+   24:  
+   25:  
+   26:  #ifdef MEMORY_MODEL_BANKED
+   27:  #pragma CODE_SEG __NEAR_SEG NON_BANKED
+   28:  #else
+   29:  #pragma CODE_SEG DEFAULT
+   30:  #endif /* MEMORY_MODEL_BANKED */
+   31:  
+   32:  static uint8_t gPhyCurrentChannel = 0x0B;
+   33:  void (*pfPhyRxTxStartCallback)(void) = NULL;
+   34:  /************************************************************************************
+   35:  *************************************************************************************
+   36:  * Private memory declarations
+   37:  *************************************************************************************
+   38:  ************************************************************************************/
+   39:  #define SUPPORTED_POWER_LEVELS      15
+   40:  
+   41:  //IAR 0x10 settings for TX power output
+   42:  uint8_t pwrOutIAR10[SUPPORTED_POWER_LEVELS] = {0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26,0x26};
+   43:  //IAR 0x11 settings for TX power output
+   44:  uint8_t pwrOutIAR11[SUPPORTED_POWER_LEVELS] = {0x49,0x49,0x49,0x4A,0x4A,0x4A,0x4E,0x4D,0x4D,0x4D,0x4D,0x4D,0x4C,0x4D,0x4D};
+   45:  //IAR 0x20 settings for TX power output
+   46:  uint8_t pwrOutIAR20[SUPPORTED_POWER_LEVELS] = {0x00,0x01,0x01,0x00,0x01,0x00,0x00,0x01,0x00,0x01,0x00,0x01,0x01,0x01,0x01};
+   47:  //PP_PHY_PAPWRCTRL settings for TX power output
+   48:  uint8_t  pwrOutCtrl[SUPPORTED_POWER_LEVELS] = {0x00,0x00,0x01,0x00,0x00,0x01,0x00,0x00,0x40,0x40,0x41,0x41,0x42,0x43,0x44};
+   49:  
+   50:  /************************************************************************************
+   51:  *************************************************************************************
+   52:  * Private functions
+   53:  *************************************************************************************
+   54:  ************************************************************************************/
+   55:  extern void PhyPassRxParams(phyRxParams_t * pRxParams);
+   56:  
+   57:  /************************************************************************************
+   58:  *************************************************************************************
+   59:  * Public functions
+   60:  *************************************************************************************
+   61:  ************************************************************************************/
+   62:  
+   63:  uint8_t PhyPdDataRequest(phyPacket_t *pTxPacket, uint8_t phyTxMode, phyRxParams_t *pRxParams)
+   64:  {
+  0000 87       [2]             PSHA  
+  0001 89       [2]             PSHX  
+  0002 8b       [2]             PSHH  
+   65:    PHY_DEBUG_LOG(PDBG_DATA_REQUEST);
+   66:    
+   67:  #ifdef PHY_PARAMETERS_VALIDATION
+   68:    // null pointer
+   69:    if(NULL == pTxPacket)
+   70:    {
+   71:      return gPhyInvalidParam_c;
+   72:    }
+   73:  
+   74:    // cannot have packets shorter than FCS field (2 byte)
+   75:    if(pTxPacket->frameLength < 2)
+   76:    {
+   77:      return gPhyInvalidParam_c;
+   78:    }
+   79:  
+   80:    // if CCA required ...
+   81:    if(gCcaEnMask_c & phyTxMode)
+   82:    { // ... cannot perform other types than MODE1 and MODE2
+   83:      if( (gCcaCCA_MODE1_c != (gCcaTypeMask_c & phyTxMode)) && (gCcaCCA_MODE2_c != (gCcaTypeMask_c & phyTxMode)) )
+   84:      {
+   85:        return gPhyInvalidParam_c;
+   86:      }
+   87:      // ... cannot perform Continuous CCA on T or TR sequences
+   88:      if(gContinuousEnMask_c & phyTxMode)
+   89:      {
+   90:        return gPhyInvalidParam_c;
+   91:      }
+   92:    }
+   93:  
+   94:  #endif // PHY_PARAMETERS_VALIDATION
+   95:  
+   96:    if( gIdle_c != PhyGetSeqState() )
+  0003 b644     [3]             LDA   68
+  0005 a507     [2]             BIT   #7
+  0007 2704     [3]             BEQ   LD ;abs = 000d
+   97:    {
+   98:      return gPhyBusy_c;
+  0009 a601     [2]             LDA   #1
+  000b 206e     [3]             BRA   L7B ;abs = 007b
+  000d          LD:     
+   99:    }
+  100:    
+  101:    PP_PHY_TXP = pTxPacket;
+  000d 9efe06   [5]             LDHX  6,SP
+  0010 3540     [5]             STHX  64
+  102:    
+  103:    // perform CCA before TX if required by phyTxMode parameter
+  104:    if(gCcaEnMask_c & phyTxMode)
+  0012 95       [2]             TSX   
+  0013 e602     [3]             LDA   2,X
+  0015 a508     [2]             BIT   #8
+  0017 2715     [3]             BEQ   L2E ;abs = 002e
+  105:    {
+  106:      PP_PHY_CTL1 |=  PP_PHY_CTL1_CCABFRTX_BIT;
+  0019 1a44     [5]             BSET  5,68
+  107:      PP_PHY_CTL2 &= ~PP_PHY_CTL2_CCA_TYPE_MASK;
+  001b b645     [3]             LDA   69
+  001d a4e7     [2]             AND   #-25
+  001f b745     [3]             STA   69
+  108:      PP_PHY_CTL2 |= ((gCcaTypeMask_c & phyTxMode) << (PP_PHY_CTL2_CCA_TYPE_POS - gCcaTypePos_c));
+  0021 e602     [3]             LDA   2,X
+  0023 a403     [2]             AND   #3
+  0025 48       [1]             LSLA  
+  0026 48       [1]             LSLA  
+  0027 48       [1]             LSLA  
+  0028 ba45     [3]             ORA   69
+  002a b745     [3]             STA   69
+  109:    }
+  002c 2008     [3]             BRA   L36 ;abs = 0036
+  002e          L2E:    
+  110:    else
+  111:    {
+  112:      PP_PHY_CTL2 &= ~PP_PHY_CTL2_CCA_TYPE_MASK; // use the default type setting
+  002e b645     [3]             LDA   69
+  0030 a4e7     [2]             AND   #-25
+  0032 b745     [3]             STA   69
+  113:      PP_PHY_CTL1 &= ~PP_PHY_CTL1_CCABFRTX_BIT;
+  0034 1b44     [5]             BCLR  5,68
+  0036          L36:    
+  114:    }
+  115:  
+  116:    // slotted operation
+  117:    if(gSlottedEnMask_c & phyTxMode)
+  0036 e602     [3]             LDA   2,X
+  0038 2a03     [3]             BPL   L3D ;abs = 003d
+  118:    {
+  119:      PP_PHY_CTL1 |=  PP_PHY_CTL1_SLOTTED_BIT;
+  003a 1c44     [5]             BSET  6,68
+  120:    }
+  003c 65       [3]             SKIP2 L3F ;abs = 003f
+  003d          L3D:    
+  121:    else
+  122:    {
+  123:      PP_PHY_CTL1 &= ~PP_PHY_CTL1_SLOTTED_BIT;
+  003d 1d44     [5]             BCLR  6,68
+  003f          L3F:    
+  124:    }
+  125:  
+  126:    PP_PHY_CTL4 |=  PP_PHY_CTL4_TMR3MSK_BIT; // mask TMR3 interrupt
+  003f 1c47     [5]             BSET  6,71
+  127:    PP_PHY_CTL3 &= ~PP_PHY_CTL3_SEQ_MSK_BIT; // unmask SEQ interrupt
+  0041 1146     [5]             BCLR  0,70
+  128:  
+  129:    
+  130:    // ensure that no spurious interrupts are raised
+  131:    PP_PHY_STATUS1 =  PP_PHY_STATUS1;
+  0043 4e4d4d   [5]             MOV   77,77
+  132:    PP_PHY_STATUS2 =  PP_PHY_STATUS2;
+  0046 4e4e4e   [5]             MOV   78,78
+  133:  
+  134:    // perform TxRxAck sequence if required by phyTxMode
+  135:    if(gAckReqMask_c & phyTxMode)
+  0049 a510     [2]             BIT   #16
+  004b 270c     [3]             BEQ   L59 ;abs = 0059
+  136:    {
+  137:      PhyPassRxParams(pRxParams);
+  004d 9efe01   [5]             LDHX  1,SP
+  0050 cd0000   [6]             JSR   PhyPassRxParams
+  138:  
+  139:      PP_PHY_CTL1 |=  PP_PHY_CTL1_RXACKRQD_BIT;
+  0053 1844     [5]             BSET  4,68
+  140:      PP_PHY_CTL1 |=  gTR_c;
+  0055 1444     [5]             BSET  2,68
+  141:    }
+  0057 2009     [3]             BRA   L62 ;abs = 0062
+  0059          L59:    
+  142:    else
+  143:    {
+  144:      PhyPassRxParams(NULL);
+  0059 5f       [1]             CLRX  
+  005a 8c       [1]             CLRH  
+  005b cd0000   [6]             JSR   PhyPassRxParams
+  145:      PP_PHY_CTL1 &= ~PP_PHY_CTL1_RXACKRQD_BIT;
+  005e 1944     [5]             BCLR  4,68
+  146:      PP_PHY_CTL1 |=  gTX_c;
+  0060 1244     [5]             BSET  1,68
+  0062          L62:    
+  147:    }
+  148:    
+  149:    // Start a platform timer to prevent Transceiver lock up
+  150:    if (pfPhyRxTxStartCallback)
+  0062 450000   [3]             LDHX  @pfPhyRxTxStartCallback
+  0065 cd0000   [6]             JSR   _CMP24_RC
+  0068 00               DC.B  0
+  0069 0000             DC.W  0
+  006b 270d     [3]             BEQ   L7A ;abs = 007a
+  151:      pfPhyRxTxStartCallback();
+  006d 320001   [5]             LDHX  pfPhyRxTxStartCallback:1
+  0070 c60000   [4]             LDA   pfPhyRxTxStartCallback
+  0073 8b       [2]             PSHH  
+  0074 8b       [2]             PSHH  
+  0075 8b       [2]             PSHH  
+  0076 ac000000 [8]             CALL  _CALL_STAR08_FAR
+  007a          L7A:    
+  152:  	
+  153:    return gPhySuccess_c;
+  007a 4f       [1]             CLRA  
+  007b          L7B:    
+  154:  }
+  007b a703     [2]             AIS   #3
+  007d 81       [6]             RTS   
+  155:  
+  156:  /***********************************************************************************/
+  157:  
+  158:  uint8_t  PhyPlmeRxRequest(phyPacket_t *pRxData, phyRxParams_t *pRxParams)
+  159:  {
+  160:    PHY_DEBUG_LOG(PDBG_PLME_RX_REQUEST);
+  161:  
+  162:  #ifdef PHY_PARAMETERS_VALIDATION
+  163:    if(NULL == pRxData)
+  164:    {
+  165:      return gPhyInvalidParam_c;
+  166:    }
+  167:  #endif // PHY_PARAMETERS_VALIDATION
+  168:  
+  169:    if( gIdle_c != PhyGetSeqState() )
+  0000 b644     [3]             LDA   68
+  0002 a507     [2]             BIT   #7
+  0004 2703     [3]             BEQ   L9 ;abs = 0009
+  170:    {
+  171:      return gPhyBusy_c;
+  0006 a601     [2]             LDA   #1
+  0008 81       [6]             RTS   
+  0009          L9:     
+  172:    }
+  173:  
+  174:    PhyPassRxParams(pRxParams);
+  0009 cd0000   [6]             JSR   PhyPassRxParams
+  175:    PP_PHY_RXP = pRxData;
+  000c 9efe03   [5]             LDHX  3,SP
+  000f 3542     [5]             STHX  66
+  176:  
+  177:  //  these should be resolved in HW
+  178:  //  PP_PHY_CTL2 &= ~PP_PHY_CTL2_CCA_TYPE_MASK;
+  179:  //  PP_PHY_CTL2 |= (gCcaED_c << (PP_PHY_CTL2_CCA_TYPE_POS - gCcaTypePos_c));
+  180:  
+  181:    PP_PHY_CTL4 |=  PP_PHY_CTL4_TMR3MSK_BIT; // mask TMR3 interrupt
+  0011 1c47     [5]             BSET  6,71
+  182:    PP_PHY_CTL3 &= ~PP_PHY_CTL3_SEQ_MSK_BIT; // unmask SEQ interrupt
+  0013 1146     [5]             BCLR  0,70
+  183:  
+  184:    // ensure that no spurious interrupts are raised
+  185:    PP_PHY_STATUS1 =  PP_PHY_STATUS1;
+  0015 4e4d4d   [5]             MOV   77,77
+  186:    PP_PHY_STATUS2 =  PP_PHY_STATUS2;
+  0018 4e4e4e   [5]             MOV   78,78
+  187:  
+  188:    // start the RX sequence
+  189:    PP_PHY_CTL1 |=  gRX_c;
+  001b 1044     [5]             BSET  0,68
+  190:    
+  191:    // Start a platform timer to prevent Transceiver lock up
+  192:    if (pfPhyRxTxStartCallback)
+  001d 450000   [3]             LDHX  @pfPhyRxTxStartCallback
+  0020 cd0000   [6]             JSR   _CMP24_RC
+  0023 00               DC.B  0
+  0024 0000             DC.W  0
+  0026 270d     [3]             BEQ   L35 ;abs = 0035
+  193:      pfPhyRxTxStartCallback();
+  0028 320001   [5]             LDHX  pfPhyRxTxStartCallback:1
+  002b c60000   [4]             LDA   pfPhyRxTxStartCallback
+  002e 8b       [2]             PSHH  
+  002f 8b       [2]             PSHH  
+  0030 8b       [2]             PSHH  
+  0031 ac000000 [8]             CALL  _CALL_STAR08_FAR
+  0035          L35:    
+  194:  	
+  195:    return gPhySuccess_c;
+  0035 4f       [1]             CLRA  
+  196:  }
+  0036 81       [6]             RTS   
+  197:  
+  198:  /***********************************************************************************/
+  199:  
+  200:  uint8_t PhyPlmeCcaEdRequest(uint8_t ccaParam)
+  201:  {
+  202:    PHY_DEBUG_LOG(PDBG_PLME_CCA_ED_REQUEST);
+  203:  
+  204:  #ifdef PHY_PARAMETERS_VALIDATION
+  205:    // illegal CCA type
+  206:    if(gInvalidCcaType_c == (gCcaTypeMask_c & ccaParam))
+  207:    {
+  208:      return gPhyInvalidParam_c;
+  209:    }
+  210:  
+  211:    // cannot perform Continuous CCA using ED type
+  212:    if( (gContinuousEnMask_c & ccaParam) && (gCcaED_c == (gCcaTypeMask_c & ccaParam)) )
+  213:    {
+  214:      return gPhyInvalidParam_c;
+  215:    }
+  216:  
+  217:    // cannot perform ED request using other type than gCcaED_c
+  218:    if( (gCcaEnMask_c & ccaParam) && (gCcaED_c != (gCcaTypeMask_c & ccaParam)) )
+  219:    {
+  220:      return gPhyInvalidParam_c;
+  221:    }
+  222:  
+  223:    // cannot perform ED request using Continuous mode
+  224:    if( (gContinuousEnMask_c & ccaParam) && ((gCcaEnMask_c & ccaParam)==0) )
+  225:    {
+  226:      return gPhyInvalidParam_c;
+  227:    }
+  228:  
+  229:  #endif // PHY_PARAMETERS_VALIDATION
+  230:  
+  231:    if( gIdle_c != PhyGetSeqState() )
+  0000 97       [1]             TAX   
+  0001 b644     [3]             LDA   68
+  0003 a507     [2]             BIT   #7
+  0005 2703     [3]             BEQ   LA ;abs = 000a
+  232:    {
+  233:      return gPhyBusy_c;
+  0007 a601     [2]             LDA   #1
+  0009 81       [6]             RTS   
+  000a          LA:     
+  234:    }
+  235:  
+  236:    // write in CTL2 the desired type of CCA
+  237:    PP_PHY_CTL2 &= ~PP_PHY_CTL2_CCA_TYPE_MASK;
+  000a b645     [3]             LDA   69
+  000c a4e7     [2]             AND   #-25
+  000e b745     [3]             STA   69
+  238:    PP_PHY_CTL2 |= ((gCcaTypeMask_c & ccaParam) << (PP_PHY_CTL2_CCA_TYPE_POS - gCcaTypePos_c));
+  0010 9f       [1]             TXA   
+  0011 a403     [2]             AND   #3
+  0013 48       [1]             LSLA  
+  0014 48       [1]             LSLA  
+  0015 48       [1]             LSLA  
+  0016 ba45     [3]             ORA   69
+  0018 b745     [3]             STA   69
+  239:  
+  240:    // slotted operation
+  241:    if(gSlottedEnMask_c & ccaParam)
+  001a 5d       [1]             TSTX  
+  001b 2a03     [3]             BPL   L20 ;abs = 0020
+  242:    {
+  243:      PP_PHY_CTL1 |=  PP_PHY_CTL1_SLOTTED_BIT;
+  001d 1c44     [5]             BSET  6,68
+  244:    }
+  001f 65       [3]             SKIP2 L22 ;abs = 0022
+  0020          L20:    
+  245:    else
+  246:    {
+  247:      PP_PHY_CTL1 &= ~PP_PHY_CTL1_SLOTTED_BIT;
+  0020 1d44     [5]             BCLR  6,68
+  0022          L22:    
+  0022 9f       [1]             TXA   
+  248:    }
+  249:  
+  250:    PP_PHY_CTL4 |=  PP_PHY_CTL4_TMR3MSK_BIT; // mask TMR3 interrupt
+  0023 1c47     [5]             BSET  6,71
+  251:    PP_PHY_CTL3 &= ~PP_PHY_CTL3_SEQ_MSK_BIT; // unmask SEQ interrupt
+  0025 1146     [5]             BCLR  0,70
+  252:  
+  253:    // continuous CCA
+  254:    if(gContinuousEnMask_c & ccaParam)
+  0027 a504     [2]             BIT   #4
+  0029 2706     [3]             BEQ   L31 ;abs = 0031
+  255:    {
+  256:      // start the continuous CCA sequence
+  257:      // immediately or by TC2', depending on a previous PhyTimeSetEventTrigger() call)
+  258:      PP_PHY_CTL1 |=  gCCCA_c;
+  002b b644     [3]             LDA   68
+  002d aa05     [2]             ORA   #5
+  259:      // at the end of the scheduled sequence, an interrupt will occur:
+  260:      // CCA , SEQ or TMR3
+  261:    }
+  002f 2004     [3]             BRA   L35 ;abs = 0035
+  0031          L31:    
+  262:    // normal CCA (not continuous)
+  263:    else
+  264:    {
+  265:      // start the CCA or ED sequence (this depends on CcaType used)
+  266:      // immediately or by TC2', depending on a previous PhyTimeSetEventTrigger() call)
+  267:      PP_PHY_CTL1 |=  gCCA_c;
+  0031 b644     [3]             LDA   68
+  0033 aa03     [2]             ORA   #3
+  0035          L35:    
+  0035 b744     [3]             STA   68
+  268:      // at the end of the scheduled sequence, an interrupt will occur:
+  269:      // CCA , SEQ or TMR3
+  270:    }
+  271:    return gPhySuccess_c;
+  0037 4f       [1]             CLRA  
+  272:  }
+  0038 81       [6]             RTS   
+  273:  
+  274:  /***********************************************************************************/
+  275:  
+  276:  uint8_t PhyPlmeSetCurrentChannelRequest(uint8_t channel)
+  277:  {
+  0000 a7fe     [2]             AIS   #-2
+  278:    uint16_t nFreqTemp;
+  279:  
+  280:    PHY_DEBUG_LOG(PDBG_PLME_SET_CHAN_REQUEST);
+  281:  
+  282:  #ifdef PHY_PARAMETERS_VALIDATION
+  283:    if((channel < 11) || (channel > 26)) 
+  284:    {
+  285:      return gPhyInvalidParam_c;
+  286:    }
+  287:  #endif // PHY_PARAMETERS_VALIDATION
+  288:  
+  289:    if( gIdle_c != PhyGetSeqState() )
+  0002 97       [1]             TAX   
+  0003 b644     [3]             LDA   68
+  0005 a507     [2]             BIT   #7
+  0007 2704     [3]             BEQ   LD ;abs = 000d
+  290:    {
+  291:      return gPhyBusy_c;
+  0009 a601     [2]             LDA   #1
+  000b 2037     [3]             BRA   L44 ;abs = 0044
+  000d          LD:     
+  292:    }
+  293:    gPhyCurrentChannel = channel;
+  000d cf0000   [4]             STX   gPhyCurrentChannel
+  294:    channel  -= 11;                          // start channel numbering from 1, not 0
+  0010 9f       [1]             TXA   
+  0011 a00a     [2]             SUB   #10
+  295:    channel++;
+  296:    nFreqTemp = (channel << 5) + (channel << 3);      // multiply by 40
+  0013 ae20     [2]             LDX   #32
+  0015 87       [2]             PSHA  
+  0016 42       [5]             MUL   
+  0017 87       [2]             PSHA  
+  0018 a608     [2]             LDA   #8
+  001a 89       [2]             PSHX  
+  001b 95       [2]             TSX   
+  001c ee02     [3]             LDX   2,X
+  001e 42       [5]             MUL   
+  001f 9eeb02   [4]             ADD   2,SP
+  0022 9ee702   [4]             STA   2,SP
+  0025 9f       [1]             TXA   
+  0026 95       [2]             TSX   
+  0027 f9       [3]             ADC   ,X
+  0028 87       [2]             PSHA  
+  0029 ee01     [3]             LDX   1,X
+  002b 8a       [3]             PULH  
+  002c 9eff04   [5]             STHX  4,SP
+  297:    PP_PHY_LO1INT   = (uint8_t)(nFreqTemp >> 8) + 74; // 2400/32-1 = 74
+  002f 95       [2]             TSX   
+  0030 e603     [3]             LDA   3,X
+  0032 ab4a     [2]             ADD   #74
+  0034 c7184b   [4]             STA   6219
+  298:    PP_PHY_LO1FRACH = (uint8_t)(nFreqTemp  & 0xFF);
+  0037 e604     [3]             LDA   4,X
+  0039 c71849   [4]             STA   6217
+  299:    PP_PHY_LO1FRACL = 1; // add 1 (channel will have 500Hz offset) to avoid spurs
+  003c a601     [2]             LDA   #1
+  003e c7184a   [4]             STA   6218
+  300:    return gPhySuccess_c;
+  0041 4f       [1]             CLRA  
+  0042 a703     [2]             AIS   #3
+  0044          L44:    
+  301:  }
+  0044 a702     [2]             AIS   #2
+  0046 81       [6]             RTS   
+  302:  
+  303:  /***********************************************************************************/
+  304:  
+  305:  uint8_t PhyPlmeGetCurrentChannelRequest(void)
+  306:  {
+  307:    return gPhyCurrentChannel;
+  0000 c60000   [4]             LDA   gPhyCurrentChannel
+  308:  }
+  0003 81       [6]             RTS   
+  309:  
+  310:  /***********************************************************************************/
+  311:  
+  312:  /***********************************************************************************/
+  313:  
+  314:  uint8_t PhyPlmeSetPwrLevelRequest(uint8_t pwrLevel)
+  315:  {
+  316:    PHY_DEBUG_LOG(PDBG_PLME_SET_POWER_REQUEST);
+  317:  
+  318:    if(pwrLevel > (SUPPORTED_POWER_LEVELS - 1))
+  0000 a10e     [2]             CMP   #14
+  0002 2303     [3]             BLS   L7 ;abs = 0007
+  319:    {
+  320:      return gPhyInvalidParam_c;
+  0004 a602     [2]             LDA   #2
+  0006 81       [6]             RTS   
+  0007          L7:     
+  321:    }
+  322:  
+  323:    IoIndirectWrite(0x10, pwrOutIAR10[pwrLevel]);
+  0007 ae10     [2]             LDX   #16
+  0009 cf185b   [4]             STX   6235
+  000c 8c       [1]             CLRH  
+  000d 97       [1]             TAX   
+  000e de0000   [4]             LDX   @pwrOutIAR10,X
+  0011 cf185c   [4]             STX   6236
+  324:    IoIndirectWrite(0x11, pwrOutIAR11[pwrLevel]);  
+  0014 ae11     [2]             LDX   #17
+  0016 cf185b   [4]             STX   6235
+  0019 87       [2]             PSHA  
+  001a 97       [1]             TAX   
+  001b de0000   [4]             LDX   @pwrOutIAR11,X
+  001e cf185c   [4]             STX   6236
+  325:    IoIndirectWrite(0x20, pwrOutIAR20[pwrLevel]);
+  0021 a620     [2]             LDA   #32
+  0023 c7185b   [4]             STA   6235
+  0026 88       [3]             PULX  
+  0027 d60000   [4]             LDA   @pwrOutIAR20,X
+  002a c7185c   [4]             STA   6236
+  326:    PP_PHY_PAPWRCTRL = pwrOutCtrl[pwrLevel];
+  002d d60000   [4]             LDA   @pwrOutCtrl,X
+  0030 c7184c   [4]             STA   6220
+  327:    
+  328:    return gPhySuccess_c;
+  0033 4f       [1]             CLRA  
+  329:  }
+  0034 81       [6]             RTS   
+  330:  
+  331:  /***********************************************************************************/
+  332:  
+  333:  #pragma CODE_SEG DEFAULT
+  334:  

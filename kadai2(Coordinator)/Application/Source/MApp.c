@@ -989,29 +989,4 @@ uint8_t ASP_APP_SapHandler(aspToAppMsg_t *pMsg)
   return gSuccess_c;
 }
 
-/******************************************************************************
-* The App_WaitMsg(nwkMessage_t *pMsg, uint8_t msgType) function does not, as
-* the name implies, wait for a message, thus blocking the execution of the
-* state machine. Instead the function analyzes the supplied message to determine
-* whether or not the message is of the expected type.
-* The function may return either of the following values:
-*   errorNoError: The message was of the expected type.
-*   errorNoMessage: The message pointer is NULL.
-*   errorWrongConfirm: The message is not of the expected type.
-*
-******************************************************************************/
-static uint8_t App_WaitMsg(nwkMessage_t *pMsg, uint8_t msgType)
-{
-  /* Do we have a message? If not, the exit with error code */
-  if(pMsg == NULL)
-    return errorNoMessage;
-
-  /* Is it the expected message type? If not then exit with error code */
-  if(pMsg->msgType != msgType)
-    return errorWrongConfirm;
-
-  /* Found the expected message. Return with success code */
-  return errorNoError;
-}
-
 /******************************************************************************/
