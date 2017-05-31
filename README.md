@@ -14,8 +14,8 @@
 
 ### 全端末共通
 
-+PanID 0x7004
-+Channel 20
+PanID 0x7004
+Channel 20
 
 ### 個別
 Cordinator short adress 0x7004
