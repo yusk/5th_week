@@ -44,6 +44,16 @@
 /* Scan duration must be equal to (Beacon order + 1)  */
 #define mDefaultValueOfScanDuration_c 7
 
+/*Set the Coordinator short address */ 
+#define mDefaultValueOfShortAddress_c     0x7004
+
+/*Set the Coordinator PanID */ 
+#define mDefaultValueOfPanId_c            0x7004
+
+/* Defines the beaconed network configuration. The values shown
+   are suitable for transfer of 19200bps bidirectional UART data. */
+#define mDefaultValueOfBeaconOrder_c      6
+#define mDefaultValueOfSuperframeOrder_c  6
 
 /************************************************************************************
 *************************************************************************************

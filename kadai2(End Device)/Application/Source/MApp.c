@@ -597,6 +597,7 @@ void AppTask(event_t events)
       /* Messages from the MCPS must always be freed. */
       MSG_Free(pMsgIn);
     }
+  }
   
   /* Check for pending messages in the Queue */ 
   if(MSG_Pending(&mMcpsNwkInputQueue))
