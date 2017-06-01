@@ -87,12 +87,12 @@ Entry point: 0x59F2 (_Startup)
 _startupData is allocated at 0x2080 and uses 12 Bytes
 extern struct _tagStartup {
   unsigned flags          0
-  _PFunc   main           0x7573    (main)
+  _PFunc   main           0x7576    (main)
   long     stackOffset    0x2FF
   unsigned nofZeroOut     2
   _Range   pZeroOut       0x80     1
                           0x300     2549
-  _Copy    *toCopyDownBeg 0x7F4D
+  _Copy    *toCopyDownBeg 0x7F50
 } _startupData;
 
 *********************************************************************************************
@@ -102,10 +102,10 @@ Section Name                    Size  Type     From       To       Segment
 MY_ZEROPAGE                        1   R/W       0x80       0x80   ZERO_PAGE_RAM
 .data                            104   R/W      0x300      0x367   APP_RAM
 NON_BANKED                      5027     R     0x4000     0x53A2   APP_CODE_1
-.copy                            110     R     0x7F4D     0x7FBA   APP_CODE_1
+.copy                            110     R     0x7F50     0x7FBD   APP_CODE_1
 .rodata                          293     R     0x53A3     0x54C7   APP_CODE_1
 .rodata1                        1136     R     0x54C8     0x5937   APP_CODE_1
-.text                           9509     R     0x5A28     0x7F4C   APP_CODE_1
+.text                           9512     R     0x5A28     0x7F4F   APP_CODE_1
 .startData                        36     R     0x2080     0x20A3   APP_STARTUP_STRUC_FLASH
 FREESCALE_PROD_DATA               78     R     0xFF50     0xFF9D   FREESCALE_PROD_FLASH
 NV_REGISTERS_SECTION              16     R     0xFFB0     0xFFBF   RES_NV_REGISTERS_FLASH
@@ -124,7 +124,7 @@ PPAGE_2_3                        232     R    0x2A4C4    0x2A5AB   PPAGE_2
 RES_RESET_VECTOR_FLASH_vect          2     R     0xFFFE     0xFFFF   RES_RESET_VECTOR_FLASH
 
 Summary of section sizes per section type:
-READ_ONLY (R):        C5C4 (dec:    50628)
+READ_ONLY (R):        C5C7 (dec:    50631)
 READ_WRITE (R/W):      BF6 (dec:     3062)
 
 *********************************************************************************************
@@ -425,16 +425,16 @@ MODULE:                 -- MApp_c.obj --
      App_StartScan                             70AB      5C      92      10   .text       
      App_HandleScanEdConfirm                   7107      B7     183      12   .text       
      App_StartCoordinator                      71BE      B6     182      11   .text       
-     App_SendAssociateResponse                 7274      BB     187      11   .text       
-     App_HandleMlmeInput                       732F      44      68       2   .text       
-     App_HandleMcpsInput                       7373      92     146      20   .text       
-     App_WaitMsg                               7405      10      16       6   .text       
-     App_TransmitUartData                      7415      E7     231       6   .text       
-     App_HandleGenericKey                      74FC      30      48       2   .text       
-     App_HandleKeys                            752C       5       5       2   .text       
-     MLME_NWK_SapHandler                       7531      1E      30       8   .text       
-     MCPS_NWK_SapHandler                       754F      1E      30      12   .text       
-     ASP_APP_SapHandler                        756D       6       6       2   .text       
+     App_SendAssociateResponse                 7274      BE     190      12   .text       
+     App_HandleMlmeInput                       7332      44      68       2   .text       
+     App_HandleMcpsInput                       7376      92     146      20   .text       
+     App_WaitMsg                               7408      10      16       6   .text       
+     App_TransmitUartData                      7418      E7     231       6   .text       
+     App_HandleGenericKey                      74FF      30      48       2   .text       
+     App_HandleKeys                            752F       5       5       2   .text       
+     MLME_NWK_SapHandler                       7534      1E      30       8   .text       
+     MCPS_NWK_SapHandler                       7552      1E      30      12   .text       
+     ASP_APP_SapHandler                        7570       6       6       2   .text       
 - VARIABLES:
      maShortAddress                            53A3       2       2       4   .rodata     
      maPanId                                   53A5       2       2       3   .rodata     
@@ -486,25 +486,25 @@ MODULE:                 -- MApp_c.obj --
      gState                                     5FD       1       1       7   .common     
 MODULE:                 -- MApp_init_c.obj --
 - PROCEDURES:
-     main                                      7573      46      70       2   .text       
-     IdleTask                                  75B9       1       1       2   .text       
-     Init_MacExtendedAddress                   75BA      3A      58       2   .text       
-     BeeAppAssert                              75F4       8       8       2   .text       
+     main                                      7576      46      70       2   .text       
+     IdleTask                                  75BC       1       1       2   .text       
+     Init_MacExtendedAddress                   75BD      3A      58       2   .text       
+     BeeAppAssert                              75F7       8       8       2   .text       
 - VARIABLES:
      gAppTaskID_c                               5FE       1       1      11   .common     
 MODULE:                 -- MacInit_c.obj --
 - PROCEDURES:
-     MacInit                                   75FC       5       5       2   .text       
-     TS_PlaceHolderTaskInit                    7601       1       1       2   .text       
-     MacTaskInit                               7602      6B     107       2   .text       
+     MacInit                                   75FF       5       5       2   .text       
+     TS_PlaceHolderTaskInit                    7604       1       1       2   .text       
+     MacTaskInit                               7605      6B     107       2   .text       
 - VARIABLES:
      MacTaskTable                              53A7       9       9       6   .rodata     
      gMacTaskID_c                               5FF       1       1      24   .common     
 MODULE:                 -- GlobalVars_c.obj --
 - PROCEDURES:
-     MM_InitMsgTracking                        766D       1       1       2   .text       
-     MM_AddMsgToTrackingArray                  766E       1       1       2   .text       
-     MM_UpdateMsgTracking                      766F       2       2       6   .text       
+     MM_InitMsgTracking                        7670       1       1       2   .text       
+     MM_AddMsgToTrackingArray                  7671       1       1       2   .text       
+     MM_UpdateMsgTracking                      7672       2       2       6   .text       
 - VARIABLES:
      poolInfo                                  53B0       9       9       1   .rodata     
      gNumAclEntryDescriptors                   53B9       1       1       3   .rodata     
@@ -561,36 +561,36 @@ MODULE:                 -- rtshc08.o (ansibim.lib) --
 - VARIABLES:
 MODULE:                 -- PhyMacMsg_c.obj (802.15.4_MAC_FFD_S08MC1323x.Lib) --
 - PROCEDURES:
-     MM_Init                                   7671      8E     142       2   .text       
-     List_ClearAnchor                          76FF       4       4      24   .text       
-     List_AddTail                              7703      45      69      22   .text       
-     List_AddHead                              7748      3F      63      10   .text       
-     List_RemoveHead                           7787      2B      43      24   .text       
-     List_Remove                               77B2      53      83       6   .text       
-     List_GetFirst                             7805      1B      27      12   .text       
-     List_GetNext                              7820      20      32      10   .text       
-     MM_AddToPool                              7840      20      32       2   .text       
-     MM_AllocPool                              7860      4A      74       2   .text       
-     MM_Alloc                                  78AA       8       8      44   .text       
-     MM_Free                                   78B2      5B      91      96   .text       
-     MM_AllocFast                              790D      58      88       8   .text       
-     MM_SetPrivatePool                         7965      13      19       8   .text       
+     MM_Init                                   7674      8E     142       2   .text       
+     List_ClearAnchor                          7702       4       4      24   .text       
+     List_AddTail                              7706      45      69      22   .text       
+     List_AddHead                              774B      3F      63      10   .text       
+     List_RemoveHead                           778A      2B      43      24   .text       
+     List_Remove                               77B5      53      83       6   .text       
+     List_GetFirst                             7808      1B      27      12   .text       
+     List_GetNext                              7823      20      32      10   .text       
+     MM_AddToPool                              7843      20      32       2   .text       
+     MM_AllocPool                              7863      4A      74       2   .text       
+     MM_Alloc                                  78AD       8       8      44   .text       
+     MM_Free                                   78B5      5B      91      96   .text       
+     MM_AllocFast                              7910      58      88       8   .text       
+     MM_SetPrivatePool                         7968      13      19       8   .text       
 - VARIABLES:
      gFreeMessagesCount                         A54       1       1       7   .common     
 MODULE:                 -- SmApi_c.obj (802.15.4_MAC_FFD_S08MC1323x.Lib) --
 - PROCEDURES:
-     SmApi_UndefState                          7978       1       1       6   .text       
+     SmApi_UndefState                          797B       1       1       6   .text       
 - VARIABLES:
 MODULE:                 -- SecurityLib_c.obj (802.15.4_MAC_FFD_S08MC1323x.Lib) --
 - PROCEDURES:
-     CCM_XorN                                  7979      1E      30       6   .text       
-     CCM_CreateAB0                             7997      24      36       6   .text       
-     CCM_GetBlockLength                        79BB       7       7       4   .text       
-     SecLib_CcmStar                            79C2     273     627      11   .text       
+     CCM_XorN                                  797C      1E      30       6   .text       
+     CCM_CreateAB0                             799A      24      36       6   .text       
+     CCM_GetBlockLength                        79BE       7       7       4   .text       
+     SecLib_CcmStar                            79C5     273     627      11   .text       
 - VARIABLES:
 MODULE:                 -- SecurityApply_c.obj (802.15.4_MAC_FFD_S08MC1323x.Lib) --
 - PROCEDURES:
-     Sec_ApplyRxSecurity                       7C35     318     792      12   .text       
+     Sec_ApplyRxSecurity                       7C38     318     792      12   .text       
      Sec_ApplyTxSecurity                       C000     232     562       6   APP_CODE_2_0
      Sec_TraverseBeacon                        C232      29      41       4   APP_CODE_2_0
      Sec_SecLevelToIntLength                   C25B      11      17       4   APP_CODE_2_0
@@ -1219,7 +1219,7 @@ MODULE STATISTIC
   PhyPlmeData_c.obj                           64    362      0
   PhyTime_c.obj                                0     54      0
   UartUtil_c.obj                               0    340      0
-  MApp_c.obj                                  58   1801   1140
+  MApp_c.obj                                  58   1804   1140
   MApp_init_c.obj                              1    137      0
   MacInit_c.obj                                1    113      9
   GlobalVars_c.obj                          1112      4     10
@@ -2037,46 +2037,46 @@ OBJECT LIST SORTED BY ADDRESS
      App_StartScan                             70AB      5C      92      10   .text       
      App_HandleScanEdConfirm                   7107      B7     183      12   .text       
      App_StartCoordinator                      71BE      B6     182      11   .text       
-     App_SendAssociateResponse                 7274      BB     187      11   .text       
-     App_HandleMlmeInput                       732F      44      68       2   .text       
-     App_HandleMcpsInput                       7373      92     146      20   .text       
-     App_WaitMsg                               7405      10      16       6   .text       
-     App_TransmitUartData                      7415      E7     231       6   .text       
-     App_HandleGenericKey                      74FC      30      48       2   .text       
-     App_HandleKeys                            752C       5       5       2   .text       
-     MLME_NWK_SapHandler                       7531      1E      30       8   .text       
-     MCPS_NWK_SapHandler                       754F      1E      30      12   .text       
-     ASP_APP_SapHandler                        756D       6       6       2   .text       
-     main                                      7573      46      70       2   .text       
-     IdleTask                                  75B9       1       1       2   .text       
-     Init_MacExtendedAddress                   75BA      3A      58       2   .text       
-     BeeAppAssert                              75F4       8       8       2   .text       
-     MacInit                                   75FC       5       5       2   .text       
-     TS_PlaceHolderTaskInit                    7601       1       1       2   .text       
-     MacTaskInit                               7602      6B     107       2   .text       
-     MM_InitMsgTracking                        766D       1       1       2   .text       
-     MM_AddMsgToTrackingArray                  766E       1       1       2   .text       
-     MM_UpdateMsgTracking                      766F       2       2       6   .text       
-     MM_Init                                   7671      8E     142       2   .text       
-     List_ClearAnchor                          76FF       4       4      24   .text       
-     List_AddTail                              7703      45      69      22   .text       
-     List_AddHead                              7748      3F      63      10   .text       
-     List_RemoveHead                           7787      2B      43      24   .text       
-     List_Remove                               77B2      53      83       6   .text       
-     List_GetFirst                             7805      1B      27      12   .text       
-     List_GetNext                              7820      20      32      10   .text       
-     MM_AddToPool                              7840      20      32       2   .text       
-     MM_AllocPool                              7860      4A      74       2   .text       
-     MM_Alloc                                  78AA       8       8      44   .text       
-     MM_Free                                   78B2      5B      91      96   .text       
-     MM_AllocFast                              790D      58      88       8   .text       
-     MM_SetPrivatePool                         7965      13      19       8   .text       
-     SmApi_UndefState                          7978       1       1       6   .text       
-     CCM_XorN                                  7979      1E      30       6   .text       
-     CCM_CreateAB0                             7997      24      36       6   .text       
-     CCM_GetBlockLength                        79BB       7       7       4   .text       
-     SecLib_CcmStar                            79C2     273     627      11   .text       
-     Sec_ApplyRxSecurity                       7C35     318     792      12   .text       
+     App_SendAssociateResponse                 7274      BE     190      12   .text       
+     App_HandleMlmeInput                       7332      44      68       2   .text       
+     App_HandleMcpsInput                       7376      92     146      20   .text       
+     App_WaitMsg                               7408      10      16       6   .text       
+     App_TransmitUartData                      7418      E7     231       6   .text       
+     App_HandleGenericKey                      74FF      30      48       2   .text       
+     App_HandleKeys                            752F       5       5       2   .text       
+     MLME_NWK_SapHandler                       7534      1E      30       8   .text       
+     MCPS_NWK_SapHandler                       7552      1E      30      12   .text       
+     ASP_APP_SapHandler                        7570       6       6       2   .text       
+     main                                      7576      46      70       2   .text       
+     IdleTask                                  75BC       1       1       2   .text       
+     Init_MacExtendedAddress                   75BD      3A      58       2   .text       
+     BeeAppAssert                              75F7       8       8       2   .text       
+     MacInit                                   75FF       5       5       2   .text       
+     TS_PlaceHolderTaskInit                    7604       1       1       2   .text       
+     MacTaskInit                               7605      6B     107       2   .text       
+     MM_InitMsgTracking                        7670       1       1       2   .text       
+     MM_AddMsgToTrackingArray                  7671       1       1       2   .text       
+     MM_UpdateMsgTracking                      7672       2       2       6   .text       
+     MM_Init                                   7674      8E     142       2   .text       
+     List_ClearAnchor                          7702       4       4      24   .text       
+     List_AddTail                              7706      45      69      22   .text       
+     List_AddHead                              774B      3F      63      10   .text       
+     List_RemoveHead                           778A      2B      43      24   .text       
+     List_Remove                               77B5      53      83       6   .text       
+     List_GetFirst                             7808      1B      27      12   .text       
+     List_GetNext                              7823      20      32      10   .text       
+     MM_AddToPool                              7843      20      32       2   .text       
+     MM_AllocPool                              7863      4A      74       2   .text       
+     MM_Alloc                                  78AD       8       8      44   .text       
+     MM_Free                                   78B5      5B      91      96   .text       
+     MM_AllocFast                              7910      58      88       8   .text       
+     MM_SetPrivatePool                         7968      13      19       8   .text       
+     SmApi_UndefState                          797B       1       1       6   .text       
+     CCM_XorN                                  797C      1E      30       6   .text       
+     CCM_CreateAB0                             799A      24      36       6   .text       
+     CCM_GetBlockLength                        79BE       7       7       4   .text       
+     SecLib_CcmStar                            79C5     273     627      11   .text       
+     Sec_ApplyRxSecurity                       7C38     318     792      12   .text       
      gtsAddToBack                              8000      37      55       4   PPAGE_0_1   
      gtsGetStartSlot                           8037      61      97       2   PPAGE_0_1   
      MlmeGts_GenerateGtsData                   8098      D7     215       6   PPAGE_0_1   
@@ -2548,100 +2548,100 @@ Telec_c.obj (802.15.4_MAC_FFD_S08MC1323x.Lib):
 *********************************************************************************************
 COPYDOWN SECTION
 ---------------------------------------------------------------------------------------------
-------- ROM-ADDRESS: 0x7F4D ---- SIZE       4 ---
+------- ROM-ADDRESS: 0x7F50 ---- SIZE       4 ---
 Filling bytes inserted
  00680300
-------- ROM-ADDRESS: 0x7F51 ---- RAM-ADDRESS: 0x300 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F54 ---- RAM-ADDRESS: 0x300 ---- SIZE       1 ---
 Name of initialized Object : mLEDTimerID
  FF
-------- ROM-ADDRESS: 0x7F52 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F55 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7F53 ---- RAM-ADDRESS: 0x302 ---- SIZE       9 ---
+------- ROM-ADDRESS: 0x7F56 ---- RAM-ADDRESS: 0x302 ---- SIZE       9 ---
 Name of initialized Object : mKeyRowPorts:1
  0400050100 04000502
-------- ROM-ADDRESS: 0x7F5C ---- RAM-ADDRESS: 0x30B ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F5F ---- RAM-ADDRESS: 0x30B ---- SIZE       1 ---
 Name of initialized Object : mKeyScanTimerID
  FF
-------- ROM-ADDRESS: 0x7F5D ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F60 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7F5E ---- RAM-ADDRESS: 0x30D ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7F61 ---- RAM-ADDRESS: 0x30D ---- SIZE       2 ---
 Name of initialized Object : pTimer1Isr:1
  431F
-------- ROM-ADDRESS: 0x7F60 ---- RAM-ADDRESS: 0x30F ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F63 ---- RAM-ADDRESS: 0x30F ---- SIZE       1 ---
 Name of initialized Object : gPhyCurrentChannel
  0B
-------- ROM-ADDRESS: 0x7F61 ---- RAM-ADDRESS: 0x310 ---- SIZE      15 ---
+------- ROM-ADDRESS: 0x7F64 ---- RAM-ADDRESS: 0x310 ---- SIZE      15 ---
 Name of initialized Object : pwrOutIAR10
  2626262626 2626262626 2626262626
-------- ROM-ADDRESS: 0x7F70 ---- RAM-ADDRESS: 0x31F ---- SIZE      15 ---
+------- ROM-ADDRESS: 0x7F73 ---- RAM-ADDRESS: 0x31F ---- SIZE      15 ---
 Name of initialized Object : pwrOutIAR11
  4949494A4A 4A4E4D4D4D 4D4D4C4D4D
-------- ROM-ADDRESS: 0x7F7F ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7F82 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7F80 ---- RAM-ADDRESS: 0x32F ---- SIZE      14 ---
+------- ROM-ADDRESS: 0x7F83 ---- RAM-ADDRESS: 0x32F ---- SIZE      14 ---
 Name of initialized Object : pwrOutIAR20:1
  0101000100 0001000100 01010101
-------- ROM-ADDRESS: 0x7F8E ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7F91 ---- SIZE       2 ---
 Filling bytes inserted
  0000
-------- ROM-ADDRESS: 0x7F90 ---- RAM-ADDRESS: 0x33F ---- SIZE      13 ---
+------- ROM-ADDRESS: 0x7F93 ---- RAM-ADDRESS: 0x33F ---- SIZE      13 ---
 Name of initialized Object : pwrOutCtrl:2
  0100000100 0040404141 424344
-------- ROM-ADDRESS: 0x7F9D ---- RAM-ADDRESS: 0x34C ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7FA0 ---- RAM-ADDRESS: 0x34C ---- SIZE       2 ---
 Name of initialized Object : pLastPool
  09AE
-------- ROM-ADDRESS: 0x7F9F ---- RAM-ADDRESS: 0x34E ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7FA2 ---- RAM-ADDRESS: 0x34E ---- SIZE       2 ---
 Name of initialized Object : pSecondLastPool
  09A8
-------- ROM-ADDRESS: 0x7FA1 ---- RAM-ADDRESS: 0x350 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FA4 ---- RAM-ADDRESS: 0x350 ---- SIZE       1 ---
 Name of initialized Object : aMaxFrameRetries
  03
-------- ROM-ADDRESS: 0x7FA2 ---- RAM-ADDRESS: 0x351 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FA5 ---- RAM-ADDRESS: 0x351 ---- SIZE       1 ---
 Name of initialized Object : mCMBackoff
  0A
-------- ROM-ADDRESS: 0x7FA3 ---- RAM-ADDRESS: 0x352 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FA6 ---- RAM-ADDRESS: 0x352 ---- SIZE       1 ---
 Name of initialized Object : gMacTimerID
  FF
-------- ROM-ADDRESS: 0x7FA4 ---- RAM-ADDRESS: 0x353 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FA7 ---- RAM-ADDRESS: 0x353 ---- SIZE       1 ---
 Name of initialized Object : gSequencerTimerID
  FF
-------- ROM-ADDRESS: 0x7FA5 ---- RAM-ADDRESS: 0x354 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FA8 ---- RAM-ADDRESS: 0x354 ---- SIZE       1 ---
 Name of initialized Object : gMacRxTxPacketTimerID
  FF
-------- ROM-ADDRESS: 0x7FA6 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FA9 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FA7 ---- RAM-ADDRESS: 0x356 ---- SIZE       3 ---
+------- ROM-ADDRESS: 0x7FAA ---- RAM-ADDRESS: 0x356 ---- SIZE       3 ---
 Name of initialized Object : gMlmeSm:1
- 797801
-------- ROM-ADDRESS: 0x7FAA ---- RAM-ADDRESS: 0x359 ---- SIZE       1 ---
+ 797B01
+------- ROM-ADDRESS: 0x7FAD ---- RAM-ADDRESS: 0x359 ---- SIZE       1 ---
 Name of initialized Object : gmBackoffPeriod
  0A
-------- ROM-ADDRESS: 0x7FAB ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FAE ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FAC ---- RAM-ADDRESS: 0x35B ---- SIZE       3 ---
+------- ROM-ADDRESS: 0x7FAF ---- RAM-ADDRESS: 0x35B ---- SIZE       3 ---
 Name of initialized Object : gMemCtrlSm:1
- 797801
-------- ROM-ADDRESS: 0x7FAF ---- SIZE       1 ---
+ 797B01
+------- ROM-ADDRESS: 0x7FB2 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FB0 ---- RAM-ADDRESS: 0x35F ---- SIZE       3 ---
+------- ROM-ADDRESS: 0x7FB3 ---- RAM-ADDRESS: 0x35F ---- SIZE       3 ---
 Name of initialized Object : gMemLwrSm:1
- 797801
-------- ROM-ADDRESS: 0x7FB3 ---- RAM-ADDRESS: 0x362 ---- SIZE       2 ---
+ 797B01
+------- ROM-ADDRESS: 0x7FB6 ---- RAM-ADDRESS: 0x362 ---- SIZE       2 ---
 Name of initialized Object : mActionStartClock
  FFFF
-------- ROM-ADDRESS: 0x7FB5 ---- SIZE       1 ---
+------- ROM-ADDRESS: 0x7FB8 ---- SIZE       1 ---
 Filling bytes inserted
  00
-------- ROM-ADDRESS: 0x7FB6 ---- RAM-ADDRESS: 0x365 ---- SIZE       3 ---
+------- ROM-ADDRESS: 0x7FB9 ---- RAM-ADDRESS: 0x365 ---- SIZE       3 ---
 Name of initialized Object : mActionCompleteClock:1
  FFFFFF
-------- ROM-ADDRESS: 0x7FB9 ---- SIZE       2 ---
+------- ROM-ADDRESS: 0x7FBC ---- SIZE       2 ---
 Filling bytes inserted
  0000
 
@@ -7015,6 +7015,6 @@ STATISTIC SECTION
 
 ExeFile:
 --------
-Number of blocks to be downloaded: 14
-Total size of all blocks to be downloaded: 50628
+Number of blocks to be downloaded: 13
+Total size of all blocks to be downloaded: 50631
 
