@@ -248,7 +248,7 @@ void MApp_init(void)
   Led2Flashing();
   Led3Flashing();
   Led4Flashing();
-    
+  
   UartUtil_Print("\n\rPress any switch on board to start running the application.\n\r", gAllowToBlock_d);  
   
   LCD_WriteString(1,"Press any key");
@@ -686,7 +686,7 @@ static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
   static uint8_t count;
   
   // static uint8_t nwk_addr; // deleted by yusk
- 
+
   UartUtil_Print("Sending the MLME-Associate Response message to the MAC...", gAllowToBlock_d);
  
   /* Allocate a message for the MLME */
@@ -814,7 +814,7 @@ static void Router_TransmitUartData(void)
       mpPacket->msgData.dataReq.dstAddrMode = gAddrModeShort_c;
       mpPacket->msgData.dataReq.srcAddrMode = gAddrModeShort_c;
       mpPacket->msgData.dataReq.msduLength = keysReceived;
-      /* Request MAC level acknowledgement, and 
+      /* Request MAC level acknowledgement, and a
          indirect transmission of the data packet */
       mpPacket->msgData.dataReq.txOptions = gTxOptsAck_c | gTxOptsIndirect_c; // updated by yusk
       /* Give the data packet a handle. The handle is

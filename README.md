@@ -157,3 +157,107 @@ static uint8_t App_SendAssociateResponse(nwkMessage_t *pMsgIn)
 }
 ```
 
+
+## coordinator
+E→R
+R→C
+
+'''
+case stateListen:
+    /* Transmit to coordinator data received from UART. */
+    if (events & gAppEvtMessageFromMLME_c)
+    {  
+      if (pMsgIn)
+      {  
+        /* Process it */
+        rc = App_HandleMlmeInput(pMsgIn);
+      }
+    } 
+    
+
+#if gMPL3115A2_enable    
+    MPL3115A2_dump(events);
+#endif
+  
+#if gMMA8652_enable    
+  // Start to receive periodical data 
+  if(MMA8652_start_flag){
+    MMA8652_start_flag = 0;
+    MMA8652_Start_Periodical_data();
+  }
+  
+  if (events & gAppEvt_FromMMA8652_c){
+    /* get byte from UART */
+    App_TransmitSensorData();
+  }
+    //MMA8652_dump(events);
+#endif
+    
+#if gMAG3110_enable    
+    MAG3110_dump(events);
+#endif
+    
+#if gFXAS21000_enable    
+    FXAS21000_dump(events);
+#endif
+    
+#if gMMA9553_enable    
+    MMA9553_dump(events);
+#endif
+    
+    break;
+
+
+'''
+
+
+'''
+case stateInitRooter:
+     /* Print a welcome message to the UART */
+    UartUtil_Print(" MyWirelessApp Demo Beacon Coordinator application is initialized and ready.\n\r\n\r", gAllowToBlock_d);            
+    /* Goto Energy Detection state. */
+    gState = stateScanEdStart;
+    TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);    
+    break;
+    
+  case stateScanEdStart:
+      /* Start the Energy Detection scan, and goto wait for confirm state. */
+      UartUtil_Print("Initiating the Energy Detection Scan\n\r", gAllowToBlock_d);
+      /*Print the message on the LCD also*/
+      LCD_ClearDisplay();
+      LCD_WriteString(1,"Starting Energy");
+      LCD_WriteString(2,"Detection Scan");      
+      rc = App_StartScan(gScanModeED_c);
+      if(rc == errorNoError)
+      {
+        gState = stateScanEdWaitConfirm;
+      }
+      break;
+
+'''
+
+
+'''
+case stateRooterListen:
+    /* Stay in this state forever. 
+       Transmit the data received on UART */
+    if (events & gAppEvtMessageFromMLME_c)
+    {
+      /* Get the message from MLME */
+      if (pMsgIn)
+      {      
+        /* Process it */
+        rc = Router_HandleMlmeInput(pMsgIn);
+        /* Messages from the MLME must always be freed. */
+      }
+    }
+     if (events & gAppEvtRxFromUart_c)
+    {      
+      /* get byte from UART */
+      Router_TransmitUartData();
+    
+    }  
+    break;     
+  }
+  
+'''
