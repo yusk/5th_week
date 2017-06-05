@@ -162,7 +162,106 @@ static uint8_t App_SendAssociateResponse(nwkMessage_t *pMsgIn)
 E→R
 R→C
 
+ルータ
+
 '''
+
+case stateRooterListen:
+    /* Stay in this state forever. 
+       Transmit the data received on UART */
+    if (events & gAppEvtMessageFromMLME_c)
+    {
+      /* Get the message from MLME */
+      if (pMsgIn)
+      {      
+        /* Process it */
+        rc = Router_HandleMlmeInput(pMsgIn);
+        /* Messages from the MLME must always be freed. */
+      }
+    }
+     if (events & gAppEvtRxFromUart_c)
+    {      
+      /* get byte from UART */
+      Router_TransmitUartData();
+    
+    }  
+    '''
+
+'''
+    case stateListen:
+    /* Transmit to coordinator data received from UART. */
+    if (events & gAppEvtMessageFromMLME_c)
+    {  
+      if (pMsgIn)
+      {  
+        /* Process it */
+        rc = App_HandleMlmeInput(pMsgIn);
+      }
+    } 
+    
+
+#if gMPL3115A2_enable    
+    MPL3115A2_dump(events);
+#endif
+  
+#if gMMA8652_enable    
+  // Start to receive periodical data 
+  if(MMA8652_start_flag){
+    MMA8652_start_flag = 0;
+    MMA8652_Start_Periodical_data();
+  }
+  
+  if (events & gAppEvt_FromMMA8652_c){
+    /* get byte from UART */
+    App_TransmitSensorData();
+  }
+
+'''
+
+'''
+  if (events & gAppEvtMessageFromMCPS_c)
+  {      
+    /* Get the message from MCPS */
+    pMsgIn = MSG_DeQueue(&mMcpsNwkInputQueue);
+    if (pMsgIn)
+    {              
+      /* Process it */
+      App_HandleMcpsInput(pMsgIn);
+      /* Messages from the MCPS must always be freed. */
+      MSG_Free(pMsgIn);
+    }
+  }
+'''
+
+'''
+static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
+{
+  switch(pMsgIn->msgType)
+  {
+    /* The MCPS-Data confirm is sent by the MAC to the network 
+       or application layer when data has been sent. */
+  case gMcpsDataCnf_c:
+    if(mcPendingPackets)
+      mcPendingPackets--;
+    break;
+
+  case gMcpsDataInd_c:
+    /* Copy the received data to the UART. */
+    UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
+    UartUtil_print(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);//added by ueda
+
+    
+
+    break;
+  }
+}
+
+
+'''
+
+
+
+
 case stateListen:
     /* Transmit to coordinator data received from UART. */
     if (events & gAppEvtMessageFromMLME_c)

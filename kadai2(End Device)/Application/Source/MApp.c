@@ -248,7 +248,7 @@ void MApp_init(void)
   Led2Flashing();
   Led3Flashing();
   Led4Flashing();
-  
+
   UartUtil_Print("\n\rPress any switch on board to start running the application.\n\r", gAllowToBlock_d);  
   
   LCD_WriteString(1,"Press any key");
@@ -1188,6 +1188,10 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
   case gMcpsDataInd_c:
     /* Copy the received data to the UART. */
     UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
+    UartUtil_print(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);//added by ueda
+
+    
+
     break;
   }
 }
