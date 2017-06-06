@@ -120,7 +120,7 @@ clean:
 
 pre-build:
 	-@echo 'Precompile the .prm file'
-	-"C:\Freescale\CW MCU v10.3\eclipse\../MCU/prog/chc08.exe" -ArgFile"PLM\Source\Common\Sys\crt0.args" "C:/Users/kawasaki/codewarrior_workspace/5th week/kadai2(End Device)\PLM\PRM\Linker_MC1323x_far_banked.prm" -LpX -Lp=pre.prm
+	-"C:\Freescale\CW MCU v10.3\eclipse\../MCU/prog/chc08.exe" -ArgFile"PLM\Source\Common\Sys\crt0.args" "C:/Users/bpjnx/workspace/5th_week/kadai2(End Device)\PLM\PRM\Linker_MC1323x_far_banked.prm" -LpX -Lp=pre.prm
 	-@echo ' '
 
 .PHONY: all clean dependents
