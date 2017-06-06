@@ -1369,7 +1369,8 @@ static void GenandTransData(uint8_t Length, uint8_t* pTxData, uint8_t* dest_addr
   
   if(mpPacket != NULL)
   {
-    /* get data from UART */        
+      UartUtil_Print("(GenandTransData)dest_addr: ", dest_addr)
+      /* get data from UART */        
       mpPacket->msgData.dataReq.pMsdu = (uint8_t*)(&(mpPacket->msgData.dataReq.pMsdu)) + sizeof(uint8_t*);
       FLib_MemCpy(mpPacket->msgData.dataReq.pMsdu, (uint8_t*) pTxData, Length);
       /* Data was available in the UART receive buffer. Now create an
