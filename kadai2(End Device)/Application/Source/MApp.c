@@ -69,6 +69,9 @@ static void Router_TransmitUartData(void);
 static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg);
 static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn);
 
+/* added by ueda */
+static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
+
 /* added by j */
 static uint8_t App_StartRooter(void);
 static void App_HandleScanEdConfirm(nwkMessage_t *pMsg);
@@ -567,6 +570,7 @@ void AppTask(event_t events)
       {      
         /* Process it */
         rc = Router_HandleMlmeInput(pMsgIn);
+        rc = Router_HandleMcpsInput(pMsgIn);
         /* Messages from the MLME must always be freed. */
       }
     }
@@ -1188,6 +1192,28 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
   case gMcpsDataInd_c:
     /* Copy the received data to the UART. */
     UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
+
+    
+
+    break;
+  }
+}
+
+
+/* added by ueda */
+static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
+{
+  switch(pMsgIn->msgType)
+  {
+    /* The MCPS-Data confirm is sent by the MAC to the network 
+       or application layer when data has been sent. */
+  case gMcpsDataCnf_c:
+    if(mcPendingPackets)
+      mcPendingPackets--;
+    break;
+
+  case gMcpsDataInd_c:
+    /* Copy the received data to the UART. */
     UartUtil_print(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);//added by ueda
 
     
@@ -1195,6 +1221,8 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
     break;
   }
 }
+
+
 
 /******************************************************************************
 * The App_WaitMsg(nwkMessage_t *pMsg, uint8_t msgType) function does not, as
