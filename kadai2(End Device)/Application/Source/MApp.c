@@ -1209,23 +1209,25 @@ static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
     if(mcPendingPackets)
       mcPendingPackets--;
     break;
-
+  
   case gMcpsDataInd_c:
-    /* Copy the received data to the UART. */
-    UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
+    /* The MCPS-Data indication is sent by the MAC to the network 
+       or application layer when data has been received. We simply 
+       copy the received data to the UART. */
+  if (pMsgIn->msgData.dataInd.pMsdu[0]==0x81){
     UartUtil_Print("Source NW Addr : ", gAllowToBlock_d);
-           UartUtil_PrintHex(&(((mcpsToNwkMessage_t*)pMsgIn)->msgData.dataInd.srcAddr[0]), 2, 0);
-           UartUtil_Print("\n\r", gAllowToBlock_d);
-
-           UartUtil_Print("Data:MMA8652(2g: Int2,Float10) \n\rX axis : 0x", gAllowToBlock_d);
-           UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[1], 2, 1);
-           UartUtil_Print(" /1024 [g]\n\rY axis : 0x", gAllowToBlock_d);
-           UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[3], 2, 1);
-   		UartUtil_Print(" /1024 [g]\n\rZ axis : 0x", gAllowToBlock_d);
-   		UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[5], 2, 1);
-   		UartUtil_Print(" /1024 [g]\n\r", gAllowToBlock_d);
-   		//UartUtil_Tx(&pMsgIn->msgData.dataInd.pMsdu[1], 6);
-    //UartUtil_print(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);//added by ueda
+    UartUtil_PrintHex(&(((mcpsToNwkMessage_t*)pMsgIn)->msgData.dataInd.srcAddr[0]), 2, 0);
+    UartUtil_Print("\n\r", gAllowToBlock_d);
+    UartUtil_Print("Data:MMA8652(2g: Int2,Float10) \n\rX axis : 0x", gAllowToBlock_d);
+    UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[1], 2, 1);
+    UartUtil_Print(" /1024 [g]\n\rY axis : 0x", gAllowToBlock_d);
+    UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[3], 2, 1);
+    UartUtil_Print(" /1024 [g]\n\rX axis : 0x", gAllowToBlock_d);
+    UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[5], 2, 1);
+    UartUtil_Print(" /1024 [g]\n\r", gAllowToBlock_d);
+    /* added by yusk ~ 送信処理 ~ */
+    GenandTransData(7, pMsgIn->msgData.dataInd.pMsdu, (void*)mCoordInfo.coordAddress);
+  }
     break;
   }
 
