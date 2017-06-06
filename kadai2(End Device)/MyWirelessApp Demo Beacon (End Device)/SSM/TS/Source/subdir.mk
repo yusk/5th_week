@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-SSM/TS/Source/TS_kernel_c.obj: ../SSM/TS/Source/TS_kernel.c | pre-build
+SSM/TS/Source/TS_kernel_c.obj: ../SSM/TS/Source/TS_kernel.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #7 $<'
 	@echo 'Invoking: HCS08 Compiler'

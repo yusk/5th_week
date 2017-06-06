@@ -35,7 +35,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/LPM/PWRLib_c.obj: ../PLM/Source/LPM/PWRLib.c | pre-build
+PLM/Source/LPM/PWRLib_c.obj: ../PLM/Source/LPM/PWRLib.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #23 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -48,7 +48,7 @@ PLM/Source/LPM/%.d: ../PLM/Source/LPM/%.c
 	
 	@echo ' '
 
-PLM/Source/LPM/PWR_MC1323x_c.obj: ../PLM/Source/LPM/PWR_MC1323x.c | pre-build
+PLM/Source/LPM/PWR_MC1323x_c.obj: ../PLM/Source/LPM/PWR_MC1323x.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #24 $<'
 	@echo 'Invoking: HCS08 Compiler'

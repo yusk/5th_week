@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/RST/RSTHal_c.obj: ../PLM/Source/RST/RSTHal.c | pre-build
+PLM/Source/RST/RSTHal_c.obj: ../PLM/Source/RST/RSTHal.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #19 $<'
 	@echo 'Invoking: HCS08 Compiler'

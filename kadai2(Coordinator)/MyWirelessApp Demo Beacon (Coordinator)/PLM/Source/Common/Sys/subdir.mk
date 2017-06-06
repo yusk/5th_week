@@ -63,7 +63,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/Common/Sys/NV_Data_c.obj: ../PLM/Source/Common/Sys/NV_Data.c | pre-build
+PLM/Source/Common/Sys/NV_Data_c.obj: ../PLM/Source/Common/Sys/NV_Data.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #29 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -76,7 +76,7 @@ PLM/Source/Common/Sys/%.d: ../PLM/Source/Common/Sys/%.c
 	
 	@echo ' '
 
-PLM/Source/Common/Sys/PlatformInit_c.obj: ../PLM/Source/Common/Sys/PlatformInit.c | pre-build
+PLM/Source/Common/Sys/PlatformInit_c.obj: ../PLM/Source/Common/Sys/PlatformInit.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #30 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -84,7 +84,7 @@ PLM/Source/Common/Sys/PlatformInit_c.obj: ../PLM/Source/Common/Sys/PlatformInit.
 	@echo 'Finished building: $<'
 	@echo ' '
 
-PLM/Source/Common/Sys/crt0_c.obj: ../PLM/Source/Common/Sys/crt0.c | pre-build
+PLM/Source/Common/Sys/crt0_c.obj: ../PLM/Source/Common/Sys/crt0.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #31 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -92,7 +92,7 @@ PLM/Source/Common/Sys/crt0_c.obj: ../PLM/Source/Common/Sys/crt0.c | pre-build
 	@echo 'Finished building: $<'
 	@echo ' '
 
-PLM/Source/Common/Sys/dummyisr_c.obj: ../PLM/Source/Common/Sys/dummyisr.c | pre-build
+PLM/Source/Common/Sys/dummyisr_c.obj: ../PLM/Source/Common/Sys/dummyisr.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #32 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -100,7 +100,7 @@ PLM/Source/Common/Sys/dummyisr_c.obj: ../PLM/Source/Common/Sys/dummyisr.c | pre-
 	@echo 'Finished building: $<'
 	@echo ' '
 
-PLM/Source/Common/Sys/icg_c.obj: ../PLM/Source/Common/Sys/icg.c | pre-build
+PLM/Source/Common/Sys/icg_c.obj: ../PLM/Source/Common/Sys/icg.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #33 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -108,7 +108,7 @@ PLM/Source/Common/Sys/icg_c.obj: ../PLM/Source/Common/Sys/icg.c | pre-build
 	@echo 'Finished building: $<'
 	@echo ' '
 
-PLM/Source/Common/Sys/isrvectors_c.obj: ../PLM/Source/Common/Sys/isrvectors.c | pre-build
+PLM/Source/Common/Sys/isrvectors_c.obj: ../PLM/Source/Common/Sys/isrvectors.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #34 $<'
 	@echo 'Invoking: HCS08 Compiler'

@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/Sound/Sound_c.obj: ../PLM/Source/Sound/Sound.c | pre-build
+PLM/Source/Sound/Sound_c.obj: ../PLM/Source/Sound/Sound.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #12 $<'
 	@echo 'Invoking: HCS08 Compiler'

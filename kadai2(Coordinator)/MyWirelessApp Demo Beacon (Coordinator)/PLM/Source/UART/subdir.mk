@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/UART/Uart_c.obj: ../PLM/Source/UART/Uart.c | pre-build
+PLM/Source/UART/Uart_c.obj: ../PLM/Source/UART/Uart.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #8 $<'
 	@echo 'Invoking: HCS08 Compiler'

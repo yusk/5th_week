@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/CMT/CMT_c.obj: ../PLM/Source/CMT/CMT.c | pre-build
+PLM/Source/CMT/CMT_c.obj: ../PLM/Source/CMT/CMT.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #35 $<'
 	@echo 'Invoking: HCS08 Compiler'

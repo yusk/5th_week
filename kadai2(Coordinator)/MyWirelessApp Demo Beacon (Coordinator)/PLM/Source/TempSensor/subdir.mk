@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/TempSensor/LM61B_c.obj: ../PLM/Source/TempSensor/LM61B.c | pre-build
+PLM/Source/TempSensor/LM61B_c.obj: ../PLM/Source/TempSensor/LM61B.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #10 $<'
 	@echo 'Invoking: HCS08 Compiler'

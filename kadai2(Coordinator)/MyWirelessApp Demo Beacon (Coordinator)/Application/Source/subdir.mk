@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-Application/Source/MApp_c.obj: ../Application/Source/MApp.c | pre-build
+Application/Source/MApp_c.obj: ../Application/Source/MApp.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #42 $<'
 	@echo 'Invoking: HCS08 Compiler'

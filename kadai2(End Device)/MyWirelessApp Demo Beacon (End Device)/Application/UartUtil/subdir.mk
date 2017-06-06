@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-Application/UartUtil/UartUtil_c.obj: ../Application/UartUtil/UartUtil.c | pre-build
+Application/UartUtil/UartUtil_c.obj: ../Application/UartUtil/UartUtil.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #41 $<'
 	@echo 'Invoking: HCS08 Compiler'

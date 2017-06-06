@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/FunctionLib/FunctionLib_c.obj: ../PLM/Source/FunctionLib/FunctionLib.c | pre-build
+PLM/Source/FunctionLib/FunctionLib_c.obj: ../PLM/Source/FunctionLib/FunctionLib.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #27 $<'
 	@echo 'Invoking: HCS08 Compiler'

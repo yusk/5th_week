@@ -56,7 +56,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/Sensor/FXAS21000_c.obj: ../PLM/Source/Sensor/FXAS21000.c | pre-build
+PLM/Source/Sensor/FXAS21000_c.obj: ../PLM/Source/Sensor/FXAS21000.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #13 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -69,7 +69,7 @@ PLM/Source/Sensor/%.d: ../PLM/Source/Sensor/%.c
 	
 	@echo ' '
 
-PLM/Source/Sensor/MAG3110_c.obj: ../PLM/Source/Sensor/MAG3110.c | pre-build
+PLM/Source/Sensor/MAG3110_c.obj: ../PLM/Source/Sensor/MAG3110.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #14 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -77,7 +77,7 @@ PLM/Source/Sensor/MAG3110_c.obj: ../PLM/Source/Sensor/MAG3110.c | pre-build
 	@echo 'Finished building: $<'
 	@echo ' '
 
-PLM/Source/Sensor/MMA8652_c.obj: ../PLM/Source/Sensor/MMA8652.c | pre-build
+PLM/Source/Sensor/MMA8652_c.obj: ../PLM/Source/Sensor/MMA8652.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #15 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -85,7 +85,7 @@ PLM/Source/Sensor/MMA8652_c.obj: ../PLM/Source/Sensor/MMA8652.c | pre-build
 	@echo 'Finished building: $<'
 	@echo ' '
 
-PLM/Source/Sensor/MMA9553_c.obj: ../PLM/Source/Sensor/MMA9553.c | pre-build
+PLM/Source/Sensor/MMA9553_c.obj: ../PLM/Source/Sensor/MMA9553.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #16 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -93,7 +93,7 @@ PLM/Source/Sensor/MMA9553_c.obj: ../PLM/Source/Sensor/MMA9553.c | pre-build
 	@echo 'Finished building: $<'
 	@echo ' '
 
-PLM/Source/Sensor/MPL3115A2_c.obj: ../PLM/Source/Sensor/MPL3115A2.c | pre-build
+PLM/Source/Sensor/MPL3115A2_c.obj: ../PLM/Source/Sensor/MPL3115A2.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #17 $<'
 	@echo 'Invoking: HCS08 Compiler'

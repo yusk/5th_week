@@ -35,7 +35,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-Application/Init/MApp_init_c.obj: ../Application/Init/MApp_init.c | pre-build
+Application/Init/MApp_init_c.obj: ../Application/Init/MApp_init.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #43 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -48,7 +48,7 @@ Application/Init/%.d: ../Application/Init/%.c
 	
 	@echo ' '
 
-Application/Init/MacInit_c.obj: ../Application/Init/MacInit.c | pre-build
+Application/Init/MacInit_c.obj: ../Application/Init/MacInit.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #44 $<'
 	@echo 'Invoking: HCS08 Compiler'

@@ -63,7 +63,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-SSM/ZTC/Source/ZtcClientCommunication_c.obj: ../SSM/ZTC/Source/ZtcClientCommunication.c | pre-build
+SSM/ZTC/Source/ZtcClientCommunication_c.obj: ../SSM/ZTC/Source/ZtcClientCommunication.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #1 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -76,7 +76,7 @@ SSM/ZTC/Source/%.d: ../SSM/ZTC/Source/%.c
 	
 	@echo ' '
 
-SSM/ZTC/Source/ZtcCopyData_c.obj: ../SSM/ZTC/Source/ZtcCopyData.c | pre-build
+SSM/ZTC/Source/ZtcCopyData_c.obj: ../SSM/ZTC/Source/ZtcCopyData.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #2 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -84,7 +84,7 @@ SSM/ZTC/Source/ZtcCopyData_c.obj: ../SSM/ZTC/Source/ZtcCopyData.c | pre-build
 	@echo 'Finished building: $<'
 	@echo ' '
 
-SSM/ZTC/Source/ZtcIBManagement_c.obj: ../SSM/ZTC/Source/ZtcIBManagement.c | pre-build
+SSM/ZTC/Source/ZtcIBManagement_c.obj: ../SSM/ZTC/Source/ZtcIBManagement.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #3 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -92,7 +92,7 @@ SSM/ZTC/Source/ZtcIBManagement_c.obj: ../SSM/ZTC/Source/ZtcIBManagement.c | pre-
 	@echo 'Finished building: $<'
 	@echo ' '
 
-SSM/ZTC/Source/ZtcMain_c.obj: ../SSM/ZTC/Source/ZtcMain.c | pre-build
+SSM/ZTC/Source/ZtcMain_c.obj: ../SSM/ZTC/Source/ZtcMain.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #4 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -100,7 +100,7 @@ SSM/ZTC/Source/ZtcMain_c.obj: ../SSM/ZTC/Source/ZtcMain.c | pre-build
 	@echo 'Finished building: $<'
 	@echo ' '
 
-SSM/ZTC/Source/ZtcMsgTypeInfo_c.obj: ../SSM/ZTC/Source/ZtcMsgTypeInfo.c | pre-build
+SSM/ZTC/Source/ZtcMsgTypeInfo_c.obj: ../SSM/ZTC/Source/ZtcMsgTypeInfo.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #5 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -108,7 +108,7 @@ SSM/ZTC/Source/ZtcMsgTypeInfo_c.obj: ../SSM/ZTC/Source/ZtcMsgTypeInfo.c | pre-bu
 	@echo 'Finished building: $<'
 	@echo ' '
 
-SSM/ZTC/Source/ZtcSAPHandlerInfo_c.obj: ../SSM/ZTC/Source/ZtcSAPHandlerInfo.c | pre-build
+SSM/ZTC/Source/ZtcSAPHandlerInfo_c.obj: ../SSM/ZTC/Source/ZtcSAPHandlerInfo.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #6 $<'
 	@echo 'Invoking: HCS08 Compiler'

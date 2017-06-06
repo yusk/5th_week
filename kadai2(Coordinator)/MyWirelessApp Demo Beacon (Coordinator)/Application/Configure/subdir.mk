@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-Application/Configure/GlobalVars_c.obj: ../Application/Configure/GlobalVars.c | pre-build
+Application/Configure/GlobalVars_c.obj: ../Application/Configure/GlobalVars.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #45 $<'
 	@echo 'Invoking: HCS08 Compiler'

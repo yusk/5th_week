@@ -70,7 +70,7 @@ static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg);
 static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn);
 
 /* added by ueda */
-static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
+static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn);
 
 /* added by j */
 static uint8_t App_StartRooter(void);
@@ -1200,6 +1200,7 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
 /* added by ueda */
 static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
 {
+	
   switch(pMsgIn->msgType)
   {
     /* The MCPS-Data confirm is sent by the MAC to the network 
@@ -1212,9 +1213,22 @@ static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
   case gMcpsDataInd_c:
     /* Copy the received data to the UART. */
     UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
-    UartUtil_print(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);//added by ueda
+    UartUtil_Print("Source NW Addr : ", gAllowToBlock_d);
+           UartUtil_PrintHex(&(((mcpsToNwkMessage_t*)pMsgIn)->msgData.dataInd.srcAddr[0]), 2, 0);
+           UartUtil_Print("\n\r", gAllowToBlock_d);
+
+           UartUtil_Print("Data:MMA8652(2g: Int2,Float10) \n\rX axis : 0x", gAllowToBlock_d);
+           UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[1], 2, 1);
+           UartUtil_Print(" /1024 [g]\n\rY axis : 0x", gAllowToBlock_d);
+           UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[3], 2, 1);
+   		UartUtil_Print(" /1024 [g]\n\rZ axis : 0x", gAllowToBlock_d);
+   		UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[5], 2, 1);
+   		UartUtil_Print(" /1024 [g]\n\r", gAllowToBlock_d);
+   		//UartUtil_Tx(&pMsgIn->msgData.dataInd.pMsdu[1], 6);
+    //UartUtil_print(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);//added by ueda
     break;
   }
+
 }
 
 
