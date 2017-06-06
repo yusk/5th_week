@@ -666,14 +666,9 @@ static uint8_t App_SendAssociateResponse(nwkMessage_t *pMsgIn)
        be assigned to it. */
     if(pMsgIn->msgData.associateInd.capabilityInfo & gCapInfoAllocAddr_c)
     {
-      // if (nwk_addr >= 2){
-    	 //  return errorAllocFailed;
-      // }
       /* Assign a unique short address less than 0xfffe if the device requests so. */
-      pAssocRes->assocShortAddress[0] = 0x01;
-      pAssocRes->assocShortAddress[1] = nwk_addr;
-      nwk_addr += 1;
-      
+      pAssocRes->assocShortAddress[0] = ++nwk_addr;
+      pAssocRes->assocShortAddress[1] = 0x00;
     }
     else
     {
@@ -777,7 +772,7 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
         UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[1], 2, 1);
         UartUtil_Print(" /1024 [g]\n\rY axis : 0x", gAllowToBlock_d);
         UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[3], 2, 1);
-		UartUtil_Print(" /1024 [g]\n\rZ axis : 0x", gAllowToBlock_d);
+		UartUtil_Print(" /1024 [g]\n\rX axis : 0x", gAllowToBlock_d);
 		UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[5], 2, 1);
 		UartUtil_Print(" /1024 [g]\n\r", gAllowToBlock_d);
 		//UartUtil_Tx(&pMsgIn->msgData.dataInd.pMsdu[1], 6);

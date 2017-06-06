@@ -13,7 +13,6 @@
 #include "MApp.h"
 #include "Sound.h"
 #include "NVM_Interface.h"
-#include "CMT_interface.h"
 #include "IIC_Interface.h" // New
 //#include "IoConfig.h"
 
@@ -64,18 +63,6 @@ static void GenandTransData(uint8_t Length, uint8_t* pTxData, uint8_t* dest_addr
 
 static void count_timer  (uint8_t timerId);
 
-/* added by yusk */
-static void Router_TransmitUartData(void);
-static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg);
-static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn);
-
-/* added by ueda */
-static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
-
-/* added by j */
-static uint8_t App_StartRooter(void);
-static void App_HandleScanEdConfirm(nwkMessage_t *pMsg);
-
 volatile static uint8_t global_counter;
 
 static void count_timer(uint8_t timerId){
@@ -93,37 +80,12 @@ static void count_timer(uint8_t timerId){
 //Default Pan ID
 static const uint8_t coordinaterPanId[2] = { (mDefaultValueOfPanId_c & 0xff), (mDefaultValueOfPanId_c >> 8)};
 
-/* The current logical channel (frequency band) */
-static uint8_t mLogicalChannel;
-
 
 /************************************************************************************
 *************************************************************************************
 * Private memory declarations
 *************************************************************************************
 ************************************************************************************/
-
-/* The short address and PAN ID of the coordinator*/
-static const uint8_t maShortAddress[2] = { (mDefaultValueOfShortAddress_c & 0xff), (mDefaultValueOfShortAddress_c >> 8)};
-static const uint8_t maPanId[2] = { (mDefaultValueOfPanId_c & 0xff), (mDefaultValueOfPanId_c >> 8)};
-
-/* The current logical channel (frequency band) */
-static uint8_t mLogicalChannel;
-
-/* These byte arrays stores an associated
-   devices long and short addresses. */
-static uint8_t maDeviceShortAddress[2];
-static uint8_t maDeviceLongAddress[8];
-
-/* Data request packet for sending UART input to the coordinator */
-static nwkToMcpsMessage_t *mpPacket;
-
-/* The MSDU handle is a unique data packet identifier */
-static uint8_t mMsduHandle;
-
-/* Number of pending data packets */
-static uint8_t mcPendingPackets;
-
 
 /* Information about the PAN we are part of */
 static panDescriptor_t mCoordInfo;
@@ -251,7 +213,7 @@ void MApp_init(void)
   Led2Flashing();
   Led3Flashing();
   Led4Flashing();
-
+    
   UartUtil_Print("\n\rPress any switch on board to start running the application.\n\r", gAllowToBlock_d);  
   
   LCD_WriteString(1,"Press any key");
@@ -391,7 +353,7 @@ void AppTask(event_t events)
         {
           rc = App_HandleAssociateConfirm(pMsgIn);
           if (rc == errorNoError)
-          {
+          { 
               UartUtil_Print("Successfully associated with the coordinator.\n\r", gAllowToBlock_d);
               UartUtil_Print("We were assigned the short address 0x", gAllowToBlock_d);
               UartUtil_PrintHex(maMyAddress, mAddrMode == gAddrModeShort_c ? 2 : 8, 0);
@@ -401,30 +363,21 @@ void AppTask(event_t events)
               LCD_WriteString(1,"Ready to send");
               LCD_WriteString(2,"and receive data");      
               
-//********************************************************
-              if (maMyAddress[0]==0x01){
-            	  UartUtil_Print("\n\rSwitch Role to Rooter\n\r", gAllowToBlock_d);
-            	  gState = stateInitRooter;
-            	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
-              }else if(maMyAddress[0]==0x02){
-            	  UartUtil_Print("\n\rSwitch Role to End-Device\n\r", gAllowToBlock_d);
-            	  gState = stateListen;
-            	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
-              }
-//********************************************************
+              gState = stateListen;
+              TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
           } 
           else 
           {
           
-        	  UartUtil_Print("\n\rAssociate Confirm wasn't successful... \n\r\n\r", gAllowToBlock_d);
-        	  gState = stateAssociate;
-        	  TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
+          UartUtil_Print("\n\rAssociate Confirm wasn't successful... \n\r\n\r", gAllowToBlock_d);
+          gState = stateScanActiveStart;
+          TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
           }
         }
       }
     }
     break; 
-        
+    
   case stateListen:
     /* Transmit to coordinator data received from UART. */
     if (events & gAppEvtMessageFromMLME_c)
@@ -468,119 +421,6 @@ void AppTask(event_t events)
 #endif
     
     break;
-    
-  case stateInitRooter:
-     /* Print a welcome message to the UART */
-    UartUtil_Print(" MyWirelessApp Demo Beacon Coordinator application is initialized and ready.\n\r\n\r", gAllowToBlock_d);            
-    /* Goto Energy Detection state. */
-    gState = stateScanEdStart;
-    TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);    
-    break;
-    
-  case stateScanEdStart:
-      /* Start the Energy Detection scan, and goto wait for confirm state. */
-      UartUtil_Print("Initiating the Energy Detection Scan\n\r", gAllowToBlock_d);
-      /*Print the message on the LCD also*/
-      LCD_ClearDisplay();
-      LCD_WriteString(1,"Starting Energy");
-      LCD_WriteString(2,"Detection Scan");      
-      rc = App_StartScan(gScanModeED_c);
-      if(rc == errorNoError)
-      {
-        gState = stateScanEdWaitConfirm;
-      }
-      break;
-      
-  case stateScanEdWaitConfirm:
-      /* Stay in this state until the MLME Scan confirm message arrives,
-         and has been processed. Then goto Start Coordinator state. */
-      if (events & gAppEvtMessageFromMLME_c)
-      {
-        if (pMsgIn)
-        {
-          rc = App_WaitMsg(pMsgIn, gNwkScanCnf_c);
-          if(rc == errorNoError)
-          {
-            /* Process the ED scan confirm. The logical
-               channel is selected by this function. */
-            App_HandleScanEdConfirm(pMsgIn);
-            /* Go to the Start Coordinator state */
-            gState = stateStartRooter;
-            TS_SendEvent(gAppTaskID_c, gAppEvtStartCoordinator_c);
-          }
-        }
-      }
-      break;
-  
-  case stateStartRooter:
-    if (events & gAppEvtStartCoordinator_c)
-    {
-      /* Start up as a PAN Coordinator on the selected channel. */
-      UartUtil_Print("\n\rStarting as PAN Rooter on channel 0x", gAllowToBlock_d);
-      UartUtil_PrintHex(&mLogicalChannel, 1, FALSE);
-      UartUtil_Print("\n\r", gAllowToBlock_d);
-      /*print a message on the LCD also*/
-      LCD_ClearDisplay();
-      LCD_WriteString(1,"Starting");
-      LCD_WriteString(2,"PAN Rooter");
-      rc = App_StartRooter();
-      if(rc == errorNoError)
-      {
-        /* If the Start request was sent successfully to
-           the MLME, then goto Wait for confirm state. */
-        gState = stateStartRooterWaitConfirm;
-      }
-    }
-    break; 
-    
-  case stateStartRooterWaitConfirm:
-    /* Stay in this state until the Start confirm message
-       arrives, and then goto the Listen state. */
-    if (events & gAppEvtMessageFromMLME_c)
-    {
-      if (pMsgIn)
-      {    
-        rc = App_WaitMsg(pMsgIn, gNwkStartCnf_c);
-        if(rc == errorNoError)
-        {
-          UartUtil_Print("Started the Rooter with PAN ID 0x", gAllowToBlock_d);
-          UartUtil_PrintHex((uint8_t *)maPanId, 2, 0);
-          UartUtil_Print(", and short address 0x", gAllowToBlock_d);
-          UartUtil_PrintHex((uint8_t *)maShortAddress, 2, 0);
-          UartUtil_Print(".\n\r\n\rReady to send and receive data over the UART.\n\r\n\r", gAllowToBlock_d);
-          /*print a message on the LCD also*/
-          LCD_ClearDisplay();
-          LCD_WriteString(1,"Ready to send");
-          LCD_WriteString(2,"and receive data");
-          gState = stateRooterListen;
-          TS_SendEvent(gAppTaskID_c, gAppEvtDummyEvent_c);
-        }
-      }
-    }
-    break; 
-    
-  /* added by yusk */
-  case stateRooterListen:
-    /* Stay in this state forever. 
-       Transmit the data received on UART */
-    if (events & gAppEvtMessageFromMLME_c)
-    {
-      /* Get the message from MLME */
-      if (pMsgIn)
-      {      
-        /* Process it */
-        rc = Router_HandleMlmeInput(pMsgIn);
-        rc = Router_HandleMcpsInput(pMsgIn);
-        /* Messages from the MLME must always be freed. */
-      }
-    }
-     if (events & gAppEvtRxFromUart_c)
-    {      
-      /* get byte from UART */
-      Router_TransmitUartData();
-    
-    }  
-    break;     
   }
   
   if (pMsgIn)
@@ -625,7 +465,7 @@ void AppTask(event_t events)
 static void UartRxCallBack(void) 
 {
   uint8_t pressedKey;
-  if(stateListen == gState){
+	if(stateListen == gState){
     TS_SendEvent(gAppTaskID_c, gAppEvtRxFromUart_c);
   }else{
 	  (void)UartX_GetByteFromRxBuffer(&pressedKey);
@@ -657,193 +497,11 @@ static uint8_t App_HandleMlmeInput(nwkMessage_t *pMsg)
   }
   return errorNoError;
 }
-
-/* added by yusk */
-static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg)
-{
-  if(pMsg == NULL)
-    return errorNoMessage;
-  
-  /* Handle the incoming message. The type determines the sort of processing.*/
-  switch(pMsg->msgType) {
-  case gNwkAssociateInd_c:
-    UartUtil_Print("Received an MLME-Associate Indication from the MAC\n\r", gAllowToBlock_d);
-    /* A device sent us an Associate Request. We must send back a response.  */
-    return Router_SendAssociateResponse(pMsg);
-    break;
-    
-  case gNwkCommStatusInd_c:
-    /* Sent by the MLME after the Association Response has been transmitted. */
-    UartUtil_Print("Received an MLME-Comm-Status Indication from the MAC - status = ", gAllowToBlock_d);
-    UartUtil_PrintHex(&pMsg->msgData.commStatusInd.status, 1, gPrtHexNewLine_c);
-    break;
-  }
-  return errorNoError;
-}
-
-/* added by yusk */
-static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
-{
-  mlmeMessage_t *pMsg;
-  mlmeAssociateRes_t *pAssocRes;
-
-  static uint8_t count;
-  
-  // static uint8_t nwk_addr; // deleted by yusk
-
-  UartUtil_Print("Sending the MLME-Associate Response message to the MAC...", gAllowToBlock_d);
- 
-  /* Allocate a message for the MLME */
-  pMsg = MSG_AllocType(mlmeMessage_t);
-  if(pMsg != NULL)
-  {
-    /* This is a MLME-ASSOCIATE.res command */
-    pMsg->msgType = gMlmeAssociateRes_c;
-    
-    /* Create the Associate response message data. */
-    pAssocRes = &pMsg->msgData.associateRes;
-    
-    /* Assign a short address to the device. In this example we simply
-       choose 0x0001. Though, all devices and coordinators in a PAN must have
-       different short addresses. However, if a device do not want to use 
-       short addresses at all in the PAN, a short address of 0xFFFE must
-       be assigned to it. */
-    if(pMsgIn->msgData.associateInd.capabilityInfo & gCapInfoAllocAddr_c)
-    {
-      if(count != 0){
-    	  return errorAllocFailed;
-      }
-      /* Assign a unique short address less than 0xfffe if the device requests so. */
-      pAssocRes->assocShortAddress[1] = maMyAddress[1];
-      pAssocRes->assocShortAddress[0] = 0x02;
-      // nwk_addr += 1; // deleted by yusk
-      count += 1;
-    }
-    else
-    {
-      /* A short address of 0xfffe means that the device is granted access to
-         the PAN (Associate successful) but that long addressing is used.*/
-      pAssocRes->assocShortAddress[0] = 0xFE;
-      pAssocRes->assocShortAddress[1] = 0xFF;
-    }
-    /* Get the 64 bit address of the device requesting association. */
-    FLib_MemCpy(pAssocRes->deviceAddress, pMsgIn->msgData.associateInd.deviceAddress, 8);
-    /* Association granted. May also be gPanAtCapacity_c or gPanAccessDenied_c. */
-    pAssocRes->status = gSuccess_c;
-    /* Do not use security */
-#ifndef gMAC2006_d
-    pAssocRes->securityEnable = FALSE;
-#else
-  pAssocRes->securityLevel = 0;
-#endif //gMAC2006_d 
-    
-    /* Save device info. */
-    FLib_MemCpy(maDeviceShortAddress, pAssocRes->assocShortAddress, 2);
-    FLib_MemCpy(maDeviceLongAddress,  pAssocRes->deviceAddress,     8);
-    
-    /* Send the Associate Response to the MLME. */
-    if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
-    {
-      UartUtil_Print("Done\n\r", gAllowToBlock_d);
-      return errorNoError;
-    }
-    else
-    {
-      /* One or more parameters in the message were invalid. */
-      UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
-      return errorInvalidParameter;
-    }
-  }
-  else
-  {
-    /* Allocation of a message buffer failed. */
-    UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
-    return errorAllocFailed;
-  }
-}
-
 /************************************************************************************
 *************************************************************************************
 * Private functions
 *************************************************************************************
 ************************************************************************************/
-
-
-/* added by yusk */
-static void Router_TransmitUartData(void)
-{   
-  static uint8_t keysBuffer[mMaxKeysToReceive_c];
-  static uint8_t keysReceived = 0;
-  // const uint8_t broadcastaddress[8] = { 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }; //deleted by yusk
-
-  
-  /* get data from UART */
-  if( keysReceived < mMaxKeysToReceive_c) 
-  { 
-    if(UartX_GetByteFromRxBuffer(&keysBuffer[keysReceived])) 
-    {
-    keysReceived++;
-    }
-  }
-  /* Use multi buffering for increased TX performance. It does not really
-     have any effect at a UART baud rate of 19200bps but serves as an
-     example of how the throughput may be improved in a real-world 
-     application where the data rate is of concern. */
-  if( (mcPendingPackets < mDefaultValueOfMaxPendingDataPackets_c) && (mpPacket == NULL) ) 
-  {
-    /* If the maximum number of pending data buffes is below maximum limit 
-       and we do not have a data buffer already then allocate one. */
-    mpPacket = MSG_Alloc(gMaxRxTxDataLength_c);
-  }
-
-  if(mpPacket != NULL)
-  {
-      /* get data from UART */        
-      mpPacket->msgData.dataReq.pMsdu = (uint8_t*)(&(mpPacket->msgData.dataReq.pMsdu)) + sizeof(uint8_t*);
-      FLib_MemCpy(mpPacket->msgData.dataReq.pMsdu, (uint8_t*) keysBuffer, keysReceived);
-
-      /* Data was available in the UART receive buffer. Now create an
-         MCPS-Data Request message containing the UART data. */
-      mpPacket->msgType = gMcpsDataReq_c;
-      /* Create the header using device information stored when creating 
-         the association response. In this simple example the use of short
-         addresses is hardcoded. In a real world application we must be
-         flexible, and use the address mode required by the given situation. */
-      
-      
-      // FLib_MemCpy(mpPacket->msgData.dataReq.dstAddr, (void *)broadcastaddress, 2); // deleted by yusk
-      FLib_MemCpy(mpPacket->msgData.dataReq.srcAddr, (void *)maShortAddress, 2);
-      FLib_MemCpy(mpPacket->msgData.dataReq.dstPanId, (void *)maPanId, 2);
-      FLib_MemCpy(mpPacket->msgData.dataReq.srcPanId, (void *)maPanId, 2);
-      mpPacket->msgData.dataReq.dstAddrMode = gAddrModeShort_c;
-      mpPacket->msgData.dataReq.srcAddrMode = gAddrModeShort_c;
-      mpPacket->msgData.dataReq.msduLength = keysReceived;
-      /* Request MAC level acknowledgement, and a
-         indirect transmission of the data packet */
-      mpPacket->msgData.dataReq.txOptions = gTxOptsAck_c | gTxOptsIndirect_c; // updated by yusk
-      /* Give the data packet a handle. The handle is
-         returned in the MCPS-Data Confirm message. */
-      mpPacket->msgData.dataReq.msduHandle = mMsduHandle++;
-#ifdef gMAC2006_d
-    mpPacket->msgData.dataReq.securityLevel = 0;
-#endif //gMAC2006_d   
-      
-      /* Send the Data Request to the MCPS */
-      (void)MSG_Send(NWK_MCPS, mpPacket);
-      /* Prepare for another data buffer */
-      mpPacket = NULL;
-      mcPendingPackets++;
-      /* Receive another pressed keys */
-      keysReceived = 0;
-  }
-  
-  /* If the keysBuffer[] wasn't send over the air because there are too many pending packets, */
-  /* try to send it later   */
-  if (keysReceived)
-  {
-  TS_SendEvent(gAppTaskID_c, gAppEvtRxFromUart_c);
-  }
-}
 
 
 /******************************************************************************
@@ -1170,6 +828,7 @@ static uint8_t App_HandleAssociateConfirm(nwkMessage_t *pMsg)
   {
   return pMsg->msgData.associateCnf.status; 
   }
+  
 }
 
 
@@ -1192,33 +851,9 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
   case gMcpsDataInd_c:
     /* Copy the received data to the UART. */
     UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
-
     break;
   }
 }
-
-
-/* added by ueda */
-static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
-{
-  switch(pMsgIn->msgType)
-  {
-    /* The MCPS-Data confirm is sent by the MAC to the network 
-       or application layer when data has been sent. */
-  case gMcpsDataCnf_c:
-    if(mcPendingPackets)
-      mcPendingPackets--;
-    break;
-
-  case gMcpsDataInd_c:
-    /* Copy the received data to the UART. */
-    UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
-    UartUtil_print(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);//added by ueda
-    break;
-  }
-}
-
-
 
 /******************************************************************************
 * The App_WaitMsg(nwkMessage_t *pMsg, uint8_t msgType) function does not, as
@@ -1482,155 +1117,4 @@ uint8_t ASP_APP_SapHandler(aspToAppMsg_t *pMsg)
   return gSuccess_c;
 }
 
-/******************************************************************************
-* The App_StartScan(scanType) function will start the scan process of the
-* specified type in the MAC. This is accomplished by allocating a MAC message,
-* which is then assigned the desired scan parameters and sent to the MLME
-* service access point. The MAC PIB attributes "macShortAddress", and 
-* "macAssociatePermit" are modified.
-*
-* The function may return either of the following values:
-*   errorNoError:          The Scan message was sent successfully.
-*   errorInvalidParameter: The MLME service access point rejected the
-*                          message due to an invalid parameter.
-*   errorAllocFailed:      A message buffer could not be allocated.
-*
-******************************************************************************/
-static uint8_t App_StartRooter(void)
-{
-  /* Message for the MLME will be allocated and attached to this pointer */
-  mlmeMessage_t *pMsg;
-
-  UartUtil_Print("Sending the MLME-Start Request message to the MAC...", gAllowToBlock_d);
-  
-  /* Allocate a message for the MLME (We should check for NULL). */
-  pMsg = MSG_AllocType(mlmeMessage_t);
-  if(pMsg != NULL)
-  {
-    /* Pointer which is used for easy access inside the allocated message */
-    mlmeStartReq_t *pStartReq;
-    /* Return value from MSG_send - used for avoiding compiler warnings */
-    uint8_t ret;
-    /* Boolean value that will be written to the MAC PIB */
-    uint8_t boolFlag;
-    
-    /* Set-up MAC PIB attributes. Please note that Set, Get,
-       and Reset messages are not freed by the MLME. */
-    
-    /* We must always set the short address to something
-       else than 0xFFFF before starting a PAN. */
-    pMsg->msgType = gMlmeSetReq_c;
-    pMsg->msgData.setReq.pibAttribute = gMPibShortAddress_c;
-    pMsg->msgData.setReq.pibAttributeValue = (uint8_t *)maShortAddress;
-    ret = MSG_Send(NWK_MLME, pMsg);
-    
-    /* We must set the Association Permit flag to TRUE 
-       in order to allow devices to associate to us. */
-    pMsg->msgType = gMlmeSetReq_c;
-    pMsg->msgData.setReq.pibAttribute = gMPibAssociationPermit_c;
-    boolFlag = TRUE;
-    pMsg->msgData.setReq.pibAttributeValue = &boolFlag;
-    ret = MSG_Send(NWK_MLME, pMsg);
-    
-    /* This is a MLME-START.req command */
-    pMsg->msgType = gMlmeStartReq_c;
-    
-    /* Create the Start request message data. */
-    pStartReq = &pMsg->msgData.startReq;
-    /* PAN ID - LSB, MSB. The example shows a PAN ID of 0xBEEF. */
-    FLib_MemCpy(pStartReq->panId, (void *)maPanId, 2);
-    /* Logical Channel - the default of 11 will be overridden */
-    pStartReq->logicalChannel = mLogicalChannel;
-    /* Beacon Order: 0xF = turn off beacons, less than 0xF = turn on beacons */
-    pStartReq->beaconOrder = 0x0F;  
-    /* Superframe Order: Must be equal or less than the beacon order */
-    pStartReq->superFrameOrder = mDefaultValueOfSuperframeOrder_c;
-    /* Be a PAN coordinator */
-    pStartReq->panCoordinator = TRUE;
-    /* Dont use battery life extension */
-    pStartReq->batteryLifeExt = FALSE;
-    /* This is not a Realignment command */
-    pStartReq->coordRealignment = FALSE;
-    /* Dont use security */
-#ifndef gMAC2006_d	
-    pStartReq->securityEnable = FALSE;
-#else
-	pStartReq->coordRealignSecurityLevel = 0;
-  pStartReq->beaconSecurityLevel = 0;	
-#endif //gMAC2006_d	
-      
-    /* Send the Start request to the MLME. */
-    if(MSG_Send(NWK_MLME, pMsg) == gSuccess_c)
-    {
-      UartUtil_Print("Done\n\r", gAllowToBlock_d);
-      return errorNoError;
-    }
-    else
-    {
-      /* One or more parameters in the Start Request message were invalid. */
-      UartUtil_Print("Invalid parameter!\n\r", gAllowToBlock_d);
-      return errorInvalidParameter;
-    }
-  }
-  else
-  {
-    /* Allocation of a message buffer failed. */
-    UartUtil_Print("Message allocation failed!\n\r", gAllowToBlock_d);
-    return errorAllocFailed;
-  }
-}
-
-/******************************************************************************
-* The App_HandleScanEdConfirm(nwkMessage_t *pMsg) function will handle the
-* ED scan confirm message received from the MLME when the ED scan has completed.
-* The message contains the ED scan result list. This function will search the
-* list in order to select the logical channel with the least energy. The
-* selected channel is stored in the global variable called 'mLogicalChannel'.
-*
-******************************************************************************/
-static void App_HandleScanEdConfirm(nwkMessage_t *pMsg)
-{  
-  uint8_t n, minEnergy;
-  uint8_t *pEdList;
-  uint8_t ChannelMask;
-  
-  UartUtil_Print("Received the MLME-Scan Confirm message from the MAC\n\r", gAllowToBlock_d);
-    
-  /* Get a pointer to the energy detect results */
-  pEdList = pMsg->msgData.scanCnf.resList.pEnergyDetectList;
-  
-  /* Set the minimum energy to a large value */
-  minEnergy = 0xFF;
-
-  /* Select default channel */
-  mLogicalChannel = 11;
- 
-  /* Search for the channel with least energy */
-  for(n=0; n<16; n++)
-  {
-    ChannelMask = n + 11;
-	if((pEdList[n] < minEnergy)&&((uint8_t)((mDefaultValueOfChannel_c>>ChannelMask) & 0x1)))
-    {
-      minEnergy = pEdList[n];
-      /* Channel numbering is 11 to 26 both inclusive */
-      mLogicalChannel = n + 11; 
-    }
-  }
-  
-  /* Print out the result of the ED scan */
-  UartUtil_Print("ED scan returned the following results:\n\r  [", gAllowToBlock_d);
-  UartUtil_PrintHex(pEdList, 16, gPrtHexBigEndian_c | gPrtHexSpaces_c);
-  UartUtil_Print("]\n\r\n\r", gAllowToBlock_d);
-  
-  /* Print out the selected logical channel */
-  UartUtil_Print("Based on the ED scan the logical channel 0x", gAllowToBlock_d);
-  UartUtil_PrintHex(&mLogicalChannel, 1, 0);
-  UartUtil_Print(" was selected\n\r", gAllowToBlock_d);
-  
-  /* The list of detected energies must be freed. */
-  MSG_Free(pEdList);
-}
-
 /******************************************************************************/
-
-

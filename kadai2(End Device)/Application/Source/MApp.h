@@ -27,16 +27,17 @@
 #include "NV_Data.h"       /* Defines the interface of the Keyboard Module. */
 
 
+
 /************************************************************************************
 *************************************************************************************
 * Public macros
 *************************************************************************************
 ************************************************************************************/
 /*Set the Coordinator short address */ 
-#define mDefaultValueOfShortAddress_c     0x7004
+#define mDefaultValueOfShortAddress_c     0xCAFE
 
 /*Set the Coordinator PanID */ 
-#define mDefaultValueOfPanId_c            0x7004
+#define mDefaultValueOfPanId_c            0xBEEF
 
 /* Maximum number of outstanding packets */
 #define mDefaultValueOfMaxPendingDataPackets_c 2
@@ -44,16 +45,6 @@
 /* Scan duration must be equal to (Beacon order + 1)  */
 #define mDefaultValueOfScanDuration_c 7
 
-/*Set the Coordinator short address */ 
-#define mDefaultValueOfShortAddress_c     0x7004
-
-/*Set the Coordinator PanID */ 
-#define mDefaultValueOfPanId_c            0x7004
-
-/* Defines the beaconed network configuration. The values shown
-   are suitable for transfer of 19200bps bidirectional UART data. */
-#define mDefaultValueOfBeaconOrder_c      6
-#define mDefaultValueOfSuperframeOrder_c  6
 
 /************************************************************************************
 *************************************************************************************
@@ -68,13 +59,7 @@ enum {
   stateScanActiveWaitConfirm,
   stateAssociate,
   stateAssociateWaitConfirm,
-  stateListen,
-  stateInitRooter,
-  stateScanEdStart,
-  stateScanEdWaitConfirm,
-  stateStartRooter,
-  stateStartRooterWaitConfirm,
-  stateRooterListen
+  stateListen
 };
 
 
@@ -86,7 +71,7 @@ enum {
 #define gAppEvtRxFromUart_c            (1 << 1)
 #define gAppEvtMessageFromMLME_c       (1 << 2)
 #define gAppEvtMessageFromMCPS_c       (1 << 3)
-#define gAppEvtStartCoordinator_c      (1 << 4)
+
 #define gAppEvt_FromMPL3115A2_c        (1 << 7) // New for Freescale sensor board
 #define gAppEvt_FromMMA8652_c          (1 << 9) // New
 #define gAppEvt_FromMAG3110_c          (1 << 10)// New
