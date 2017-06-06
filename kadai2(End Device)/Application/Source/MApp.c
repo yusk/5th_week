@@ -1193,8 +1193,6 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
     /* Copy the received data to the UART. */
     UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
 
-    
-
     break;
   }
 }
@@ -1214,10 +1212,8 @@ static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
 
   case gMcpsDataInd_c:
     /* Copy the received data to the UART. */
+    UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
     UartUtil_print(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);//added by ueda
-
-    
-
     break;
   }
 }
