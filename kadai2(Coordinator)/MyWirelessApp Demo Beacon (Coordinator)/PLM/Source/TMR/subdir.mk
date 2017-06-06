@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/TMR/Timer_c.obj: ../PLM/Source/TMR/Timer.c | pre-build
+PLM/Source/TMR/Timer_c.obj: ../PLM/Source/TMR/Timer.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #11 $<'
 	@echo 'Invoking: HCS08 Compiler'

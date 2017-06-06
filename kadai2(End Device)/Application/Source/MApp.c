@@ -69,6 +69,9 @@ static void Router_TransmitUartData(void);
 static uint8_t Router_HandleMlmeInput(nwkMessage_t *pMsg);
 static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn);
 
+/* added by ueda */
+static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn);
+
 /* added by j */
 static uint8_t App_StartRooter(void);
 static void App_HandleScanEdConfirm(nwkMessage_t *pMsg);
@@ -248,7 +251,7 @@ void MApp_init(void)
   Led2Flashing();
   Led3Flashing();
   Led4Flashing();
-    
+
   UartUtil_Print("\n\rPress any switch on board to start running the application.\n\r", gAllowToBlock_d);  
   
   LCD_WriteString(1,"Press any key");
@@ -593,7 +596,7 @@ void AppTask(event_t events)
     if (pMsgIn)
     {              
       /* Process it */
-      App_HandleMcpsInput(pMsgIn);
+      Router_HandleMcpsInput(pMsgIn);
       /* Messages from the MCPS must always be freed. */
       MSG_Free(pMsgIn);
     }
@@ -686,7 +689,7 @@ static uint8_t Router_SendAssociateResponse(nwkMessage_t *pMsgIn)
   static uint8_t count;
   
   // static uint8_t nwk_addr; // deleted by yusk
- 
+
   UartUtil_Print("Sending the MLME-Associate Response message to the MAC...", gAllowToBlock_d);
  
   /* Allocate a message for the MLME */
@@ -814,7 +817,7 @@ static void Router_TransmitUartData(void)
       mpPacket->msgData.dataReq.dstAddrMode = gAddrModeShort_c;
       mpPacket->msgData.dataReq.srcAddrMode = gAddrModeShort_c;
       mpPacket->msgData.dataReq.msduLength = keysReceived;
-      /* Request MAC level acknowledgement, and 
+      /* Request MAC level acknowledgement, and a
          indirect transmission of the data packet */
       mpPacket->msgData.dataReq.txOptions = gTxOptsAck_c | gTxOptsIndirect_c; // updated by yusk
       /* Give the data packet a handle. The handle is
@@ -1188,9 +1191,49 @@ static void App_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
   case gMcpsDataInd_c:
     /* Copy the received data to the UART. */
     UartUtil_Tx(pMsgIn->msgData.dataInd.pMsdu, pMsgIn->msgData.dataInd.msduLength);
+
     break;
   }
 }
+
+
+/* added by ueda */
+static void Router_HandleMcpsInput(mcpsToNwkMessage_t *pMsgIn)
+{
+	
+  switch(pMsgIn->msgType)
+  {
+    /* The MCPS-Data confirm is sent by the MAC to the network 
+       or application layer when data has been sent. */
+  case gMcpsDataCnf_c:
+    if(mcPendingPackets)
+      mcPendingPackets--;
+    break;
+  
+  case gMcpsDataInd_c:
+    /* The MCPS-Data indication is sent by the MAC to the network 
+       or application layer when data has been received. We simply 
+       copy the received data to the UART. */
+  if (pMsgIn->msgData.dataInd.pMsdu[0]==0x81){
+    UartUtil_Print("Source NW Addr : ", gAllowToBlock_d);
+    UartUtil_PrintHex(&(((mcpsToNwkMessage_t*)pMsgIn)->msgData.dataInd.srcAddr[0]), 2, 0);
+    UartUtil_Print("\n\r", gAllowToBlock_d);
+    UartUtil_Print("Data:MMA8652(2g: Int2,Float10) \n\rX axis : 0x", gAllowToBlock_d);
+    UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[1], 2, 1);
+    UartUtil_Print(" /1024 [g]\n\rY axis : 0x", gAllowToBlock_d);
+    UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[3], 2, 1);
+    UartUtil_Print(" /1024 [g]\n\rX axis : 0x", gAllowToBlock_d);
+    UartUtil_PrintHex(&pMsgIn->msgData.dataInd.pMsdu[5], 2, 1);
+    UartUtil_Print(" /1024 [g]\n\r", gAllowToBlock_d);
+    /* added by yusk ~ 送信処理 ~ */
+    GenandTransData(7, pMsgIn->msgData.dataInd.pMsdu, (void*)mCoordInfo.coordAddress);
+  }
+    break;
+  }
+
+}
+
+
 
 /******************************************************************************
 * The App_WaitMsg(nwkMessage_t *pMsg, uint8_t msgType) function does not, as

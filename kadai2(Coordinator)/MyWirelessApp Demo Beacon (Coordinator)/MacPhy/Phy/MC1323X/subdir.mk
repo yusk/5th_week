@@ -49,7 +49,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-MacPhy/Phy/MC1323X/PhyISR_c.obj: ../MacPhy/Phy/MC1323X/PhyISR.c | pre-build
+MacPhy/Phy/MC1323X/PhyISR_c.obj: ../MacPhy/Phy/MC1323X/PhyISR.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #37 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -62,7 +62,7 @@ MacPhy/Phy/MC1323X/%.d: ../MacPhy/Phy/MC1323X/%.c
 	
 	@echo ' '
 
-MacPhy/Phy/MC1323X/PhyPacketProcessor_c.obj: ../MacPhy/Phy/MC1323X/PhyPacketProcessor.c | pre-build
+MacPhy/Phy/MC1323X/PhyPacketProcessor_c.obj: ../MacPhy/Phy/MC1323X/PhyPacketProcessor.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #38 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -70,7 +70,7 @@ MacPhy/Phy/MC1323X/PhyPacketProcessor_c.obj: ../MacPhy/Phy/MC1323X/PhyPacketProc
 	@echo 'Finished building: $<'
 	@echo ' '
 
-MacPhy/Phy/MC1323X/PhyPlmeData_c.obj: ../MacPhy/Phy/MC1323X/PhyPlmeData.c | pre-build
+MacPhy/Phy/MC1323X/PhyPlmeData_c.obj: ../MacPhy/Phy/MC1323X/PhyPlmeData.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #39 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -78,7 +78,7 @@ MacPhy/Phy/MC1323X/PhyPlmeData_c.obj: ../MacPhy/Phy/MC1323X/PhyPlmeData.c | pre-
 	@echo 'Finished building: $<'
 	@echo ' '
 
-MacPhy/Phy/MC1323X/PhyTime_c.obj: ../MacPhy/Phy/MC1323X/PhyTime.c | pre-build
+MacPhy/Phy/MC1323X/PhyTime_c.obj: ../MacPhy/Phy/MC1323X/PhyTime.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #40 $<'
 	@echo 'Invoking: HCS08 Compiler'

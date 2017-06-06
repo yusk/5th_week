@@ -98,7 +98,7 @@ main-build: MyWirelessApp\ Demo\ Beacon\ (End\ Device).abs
 endif
 
 # Tool invocations
-MyWirelessApp\ Demo\ Beacon\ (End\ Device).abs: $(OBJS) $(USER_OBJS) pre.prm | pre-build
+MyWirelessApp\ Demo\ Beacon\ (End\ Device).abs: $(OBJS) $(USER_OBJS) pre.prm pre-build
 	@echo 'Building target: $@'
 	@echo 'Executing target #46 $@'
 	@echo 'Invoking: Linker'
@@ -106,7 +106,7 @@ MyWirelessApp\ Demo\ Beacon\ (End\ Device).abs: $(OBJS) $(USER_OBJS) pre.prm | p
 	@echo 'Finished building target: $@'
 	@echo ' '
 
-MyWirelessApp\ Demo\ Beacon\ (End\ Device).abs.s19: $(BBL_SRCS) $(EXECUTABLES) | pre-build
+MyWirelessApp\ Demo\ Beacon\ (End\ Device).abs.s19: $(BBL_SRCS) $(EXECUTABLES) pre-build
 	@echo 'Executing target #47 $@'
 	@echo 'Invoking: Burner'
 	"$(HC08ToolsEnv)/burner" -ArgFile"MyWirelessApp Demo Beacon (End Device).abs.args" -f="$<" -env"ABS_FILE=$(strip $(EXECUTABLES_OS_FORMAT))"
@@ -115,12 +115,12 @@ MyWirelessApp\ Demo\ Beacon\ (End\ Device).abs.s19: $(BBL_SRCS) $(EXECUTABLES) |
 
 # Other Targets
 clean:
-	-$(RM) "./*/*/*.obj" "./*/*/*/*.obj" "./*/*/*/*/*.obj"  $(CPP_DEPS_QUOTED) $(CC_DEPS_QUOTED) $(CXX_DEPS_QUOTED) $(BURNER_OUTPUT_OUTPUTS_QUOTED) $(C_UPPER_DEPS_QUOTED) $(C++_DEPS_QUOTED) $(EXECUTABLES_QUOTED) "./*/*/*.d" "./*/*/*/*.d" "./*/*/*/*/*.d"  $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs.args $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).args $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).map $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).s19
+	-$(RM) "./*/*/*.obj" "./*/*/*/*.obj" "./*/*/*/*/*.obj"  $(CPP_DEPS_QUOTED) $(CC_DEPS_QUOTED) $(CXX_DEPS_QUOTED) $(BURNER_OUTPUT_OUTPUTS_QUOTED) $(C_UPPER_DEPS_QUOTED) $(C++_DEPS_QUOTED) $(EXECUTABLES_QUOTED) "./*/*/*.d" "./*/*/*/*.d" "./*/*/*/*/*.d"  $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).abs.args $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).args $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).map $(ProjDirPath)/MyWirelessApp Demo Beacon (End Device)/MyWirelessApp Demo Beacon (End Device).s19
 	-@echo ' '
 
 pre-build:
 	-@echo 'Precompile the .prm file'
-	-"C:\Freescale\CW MCU v10.3\eclipse\../MCU/prog/chc08.exe" -ArgFile"PLM\Source\Common\Sys\crt0.args" "C:/Users/kawasaki/codewarrior_workspace/5th week/kadai2(End Device)\PLM\PRM\Linker_MC1323x_far_banked.prm" -LpX -Lp=pre.prm
+	-"C:\Freescale\CW MCU v10.3\eclipse\../MCU/prog/chc08.exe" -ArgFile"PLM\Source\Common\Sys\crt0.args" "C:/Users/bpjnx/workspace/5th_week/kadai2(End Device)\PLM\PRM\Linker_MC1323x_far_banked.prm" -LpX -Lp=pre.prm
 	-@echo ' '
 
 .PHONY: all clean dependents

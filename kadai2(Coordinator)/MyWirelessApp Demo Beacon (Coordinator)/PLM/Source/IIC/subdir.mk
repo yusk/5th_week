@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/IIC/IIC_c.obj: ../PLM/Source/IIC/IIC.c | pre-build
+PLM/Source/IIC/IIC_c.obj: ../PLM/Source/IIC/IIC.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #26 $<'
 	@echo 'Invoking: HCS08 Compiler'

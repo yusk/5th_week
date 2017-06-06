@@ -35,7 +35,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/NVM/NV_Flash_c.obj: ../PLM/Source/NVM/NV_Flash.c | pre-build
+PLM/Source/NVM/NV_Flash_c.obj: ../PLM/Source/NVM/NV_Flash.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #20 $<'
 	@echo 'Invoking: HCS08 Compiler'
@@ -48,7 +48,7 @@ PLM/Source/NVM/%.d: ../PLM/Source/NVM/%.c
 	
 	@echo ' '
 
-PLM/Source/NVM/NV_FlashHAL_c.obj: ../PLM/Source/NVM/NV_FlashHAL.c | pre-build
+PLM/Source/NVM/NV_FlashHAL_c.obj: ../PLM/Source/NVM/NV_FlashHAL.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #21 $<'
 	@echo 'Invoking: HCS08 Compiler'

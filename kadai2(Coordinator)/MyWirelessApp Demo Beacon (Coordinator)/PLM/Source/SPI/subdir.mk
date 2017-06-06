@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/SPI/SPI_c.obj: ../PLM/Source/SPI/SPI.c | pre-build
+PLM/Source/SPI/SPI_c.obj: ../PLM/Source/SPI/SPI.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #18 $<'
 	@echo 'Invoking: HCS08 Compiler'

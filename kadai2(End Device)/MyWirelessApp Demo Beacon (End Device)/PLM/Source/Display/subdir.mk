@@ -28,7 +28,7 @@ OBJS_OS_FORMAT += \
 
 
 # Each subdirectory must supply rules for building sources it contributes
-PLM/Source/Display/Display_MC1323x_RCM_c.obj: ../PLM/Source/Display/Display_MC1323x_RCM.c | pre-build
+PLM/Source/Display/Display_MC1323x_RCM_c.obj: ../PLM/Source/Display/Display_MC1323x_RCM.c pre-build
 	@echo 'Building file: $<'
 	@echo 'Executing target #28 $<'
 	@echo 'Invoking: HCS08 Compiler'
