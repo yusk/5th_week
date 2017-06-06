@@ -570,7 +570,6 @@ void AppTask(event_t events)
       {      
         /* Process it */
         rc = Router_HandleMlmeInput(pMsgIn);
-        rc = Router_HandleMcpsInput(pMsgIn);
         /* Messages from the MLME must always be freed. */
       }
     }
@@ -597,7 +596,7 @@ void AppTask(event_t events)
     if (pMsgIn)
     {              
       /* Process it */
-      App_HandleMcpsInput(pMsgIn);
+      Router_HandleMcpsInput(pMsgIn);
       /* Messages from the MCPS must always be freed. */
       MSG_Free(pMsgIn);
     }
